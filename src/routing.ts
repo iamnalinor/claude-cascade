@@ -62,7 +62,6 @@ export function cascade(
   const rules = validateRules(routing, graph, main);
   validateChains(graph, original);
   const inbounds = objects(profile.inbounds ?? defaultInbounds());
-  const entry = mainEndpoints[0];
   const outbounds = original.map((outbound) =>
     outbound === main ? { ...main, tag: mainTag } : outbound,
   );
@@ -73,7 +72,6 @@ export function cascade(
   const { log: _log, ...profileSettings } = profile;
   return {
     ...profileSettings,
-    ...(entry !== undefined && { remarks: labelProfile(profile, main, entry) }),
     inbounds: (inbounds.length === 0 ? defaultInbounds() : inbounds).map(localInbound),
     outbounds: outbounds.map((outbound) => adaptXdns(outbound, options.legacyXdns === true)),
     routing: {
@@ -129,19 +127,6 @@ function defaultInbounds(): JsonObject[] {
 function fieldValue(record: JsonObject | undefined, field: string): JsonObject[string] | undefined {
   assertExactKey(record, field);
   return record?.[field];
-}
-
-function labelProfile(
-  profile: JsonObject,
-  main: JsonObject,
-  entry: readonly [string, number],
-): string {
-  const [address, port] = entry;
-  const host = address.includes(":") && !address.startsWith("[") ? `[${address}]` : address;
-  const protocol = (string(main.protocol) ?? "proxy").toUpperCase();
-  const label = `${protocol} ${host}:${port}`;
-  const title = string(profile.remarks);
-  return title === undefined ? label : `${title} · ${label}`;
 }
 
 function localInbound(inbound: JsonObject): JsonObject {

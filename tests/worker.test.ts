@@ -39,6 +39,7 @@ test("merges JSON and base64 while retaining old routes and rejecting a placehol
   expect(response.headers.get("cache-control")).toBe("private, no-store");
   const profiles = objects(parseJson(await response.text()));
   expect(profiles).toHaveLength(2);
+  expect(profiles.map((profile) => profile.remarks)).toEqual(["Original", "Fixture"]);
   const original = profiles[0];
   const outbounds = objects(original?.outbounds);
   const rules = objects(object(original?.routing)?.rules);
@@ -194,7 +195,7 @@ test("renders compatible XDNS and identical names across client versions", async
     expect(response.status).toBe(200);
     const [profile] = objects(parseJson(await response.text()));
     const [main] = objects(profile?.outbounds);
-    expect(profile?.remarks).toBe("Fixture · VLESS 10.0.0.10:443");
+    expect(profile?.remarks).toBe("Fixture");
     expect(main?.streamSettings).toHaveProperty("finalmask.udp[0].settings", {
       domains: ["tunnel.example.com:a"],
       resolvers: ["tunnel.example.com:a+udp://192.0.2.53:53"],
@@ -205,7 +206,7 @@ test("renders compatible XDNS and identical names across client versions", async
   expect(currentResponse.status).toBe(200);
   const [currentProfile] = objects(parseJson(await currentResponse.text()));
   const [currentMain] = objects(currentProfile?.outbounds);
-  expect(currentProfile?.remarks).toBe("Fixture · VLESS 10.0.0.10:443");
+  expect(currentProfile?.remarks).toBe("Fixture");
   expect(currentMain?.streamSettings).toHaveProperty("finalmask.udp[0].settings", {
     domains: [
       {
