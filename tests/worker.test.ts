@@ -59,6 +59,11 @@ test("merges JSON and base64 while retaining old routes and rejecting a placehol
         "domain:claudeusercontent.com",
         "domain:claudemcpcontent.com",
         "domain:withpersona.com",
+        "domain:yoti.com",
+        "domain:arkoselabs.com",
+        "domain:workos.com",
+        "domain:sift.com",
+        "domain:siftscience.com",
       ],
       outboundTag: "cascade-exit2",
       type: "field",
@@ -72,6 +77,11 @@ test("merges JSON and base64 while retaining old routes and rejecting a placehol
     { ip: ["geoip:ru"], outboundTag: "cascade-ru-direct", type: "field" },
     old,
   ]);
+  expect(objects(object(profiles.at(-1)?.routing)?.rules)[0]).toEqual({
+    balancerTag: "auto-cascade",
+    domain: rules[0]?.domain ?? [],
+    type: "field",
+  });
 });
 
 test("keeps an available source and blocks cross-origin redirects and provider-bound output", async () => {

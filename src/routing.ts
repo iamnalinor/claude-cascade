@@ -1,6 +1,11 @@
 import { endpoints, isKnown, isProxy } from "./endpoints.ts";
 import { type JsonObject, object, objects, string } from "./json-value.ts";
-import { assertExactKey, indexOutbounds, validateChains } from "./outbound-graph.ts";
+import {
+  adaptLegacyTransport,
+  assertExactKey,
+  indexOutbounds,
+  validateChains,
+} from "./outbound-graph.ts";
 import { adaptXdns } from "./xdns-compat.ts";
 
 const TARGETS = [
@@ -11,6 +16,11 @@ const TARGETS = [
   "domain:claudeusercontent.com",
   "domain:claudemcpcontent.com",
   "domain:withpersona.com",
+  "domain:yoti.com",
+  "domain:arkoselabs.com",
+  "domain:workos.com",
+  "domain:sift.com",
+  "domain:siftscience.com",
 ];
 const RU_DOMAINS = ["geosite:category-ru", "domain:ru", "domain:su", "domain:xn--p1ai"];
 const SNIFF_FOR_ROUTING = ["http", "tls", "quic"];
@@ -45,7 +55,7 @@ export function cascade(
   if (Object.keys(profile).some((key) => !PROFILE_FIELDS.has(key))) {
     throw new Error("unsupported-profile-fields");
   }
-  const original = objects(profile.outbounds);
+  const original = objects(profile.outbounds).map(adaptLegacyTransport);
   const main = selectMain(original, options.mainTag);
   const graph = indexOutbounds(original);
   const routing = object(profile.routing) ?? {};
@@ -81,12 +91,7 @@ export function cascade(
     routing: {
       ...routing,
       domainStrategy: "IPOnDemand",
-      rules: [
-        { domain: TARGETS, outboundTag: exitTag, type: "field" },
-        { domain: ["full:ip.net.coffee"], outboundTag: exitTag, type: "field" },
-        ...russianRules(ruTag),
-        ...rules,
-      ],
+      rules: [...targetRules({ outboundTag: exitTag }), ...russianRules(ruTag), ...rules],
     },
   };
 }
@@ -106,6 +111,16 @@ export function russianRules(tag: string): JsonObject[] {
     { domain: RU_DOMAINS, outboundTag: tag, type: "field" },
     { ip: ["geoip:ru"], outboundTag: tag, type: "field" },
   ];
+}
+
+export function targetRules(
+  destination: { balancerTag: string } | { outboundTag: string },
+): JsonObject[] {
+  return [TARGETS, ["full:ip.net.coffee"]].map((domain) => ({
+    ...destination,
+    domain,
+    type: "field",
+  }));
 }
 
 function cascadeTags(

@@ -74,3 +74,62 @@ test("appends one automatic profile that measures complete cascades and blocks f
   const fragment = object(object(secondHop?.streamSettings)?.sockopt)?.dialerProxy;
   expect(outbounds.find((entry) => entry.tag === fragment)?.protocol).toBe("freedom");
 });
+
+test("modern Xray keeps convertible and independent candidates when a provider uses legacy proxySettings", async () => {
+  const transport = {
+    ...MAIN,
+    proxySettings: { tag: "fragment", transportLayer: true },
+    settings: { ...MAIN.settings, address: "transport.example.com" },
+    tag: "transport",
+  };
+  const legacy = {
+    ...MAIN,
+    proxySettings: { tag: "fragment" },
+    settings: { ...MAIN.settings, address: "legacy.example.com" },
+    tag: "legacy",
+  };
+  const fragment = { protocol: "freedom", tag: "fragment" };
+  const worker = createWorker({
+    fetcher: () =>
+      Promise.resolve(
+        Response.json([
+          { outbounds: [MAIN, transport, legacy, fragment], remarks: "Provider group" },
+          { outbounds: [transport, fragment], remarks: "Transport detour" },
+        ]),
+      ),
+  });
+  const response = await worker.fetch(request(), env());
+  expect(response.status).toBe(200);
+  const profiles = objects(parseJson(await response.text()));
+  expect(profiles.map((profile) => profile.remarks)).toEqual(["Transport detour", "Все → EXIT2"]);
+  expect(objects(profiles[0]?.outbounds)[0]).toMatchObject({
+    streamSettings: { sockopt: { dialerProxy: "fragment" } },
+  });
+  const automatic = objects(profiles.at(-1)?.outbounds);
+  expect(automatic.some((entry) => entry.proxySettings !== undefined)).toBe(false);
+  expect(
+    automatic.filter((entry) => string(entry.tag)?.startsWith("auto-exit-") === true),
+  ).toHaveLength(2);
+  const converted = automatic.find(
+    (entry) => object(entry.settings)?.address === "transport.example.com",
+  );
+  const dialer = object(object(converted?.streamSettings)?.sockopt)?.dialerProxy;
+  expect(automatic.find((entry) => entry.tag === dialer)?.protocol).toBe("freedom");
+
+  const throne = request();
+  throne.headers.set("user-agent", "Throne/1.2.4");
+  const oldResponse = await worker.fetch(throne, env());
+  expect(oldResponse.status).toBe(200);
+  const oldProfiles = objects(parseJson(await oldResponse.text()));
+  expect(oldProfiles[0]?.remarks).toBe("Provider group");
+  const oldAutomatic = objects(oldProfiles.at(-1)?.outbounds);
+  expect(
+    oldAutomatic.filter((entry) => string(entry.tag)?.startsWith("auto-exit-") === true),
+  ).toHaveLength(3);
+  const legacyLeg = oldAutomatic.find(
+    (entry) => object(entry.settings)?.address === "legacy.example.com",
+  );
+  expect(
+    oldAutomatic.find((entry) => entry.tag === object(legacyLeg?.proxySettings)?.tag)?.protocol,
+  ).toBe("freedom");
+});

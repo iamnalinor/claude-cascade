@@ -27,7 +27,7 @@ export async function cacheKey(inputs: KeyInputs): Promise<Request | undefined> 
     ["sign"],
   );
   const payload: JsonValue = [
-    "subscription-v4",
+    "subscription-v5",
     inputs.incoming.headers.get("user-agent"),
     JSON.stringify(inputs.config),
     inputs.upstream.url,

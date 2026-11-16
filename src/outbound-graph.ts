@@ -12,6 +12,34 @@ const OUTBOUND_FIELDS = new Set([
   "tag",
   "targetStrategy",
 ]);
+export function adaptLegacyTransport(outbound: JsonObject): JsonObject {
+  const { proxySettings, ...rest } = outbound;
+  if (proxySettings === undefined) {
+    return outbound;
+  }
+  if (proxySettings === null) {
+    return rest;
+  }
+  const proxy = object(proxySettings);
+  const tag = string(proxy?.tag);
+  assertExactKey(proxy, "transportLayer");
+  if (
+    tag === undefined ||
+    (proxy?.transportLayer != null && typeof proxy.transportLayer !== "boolean") ||
+    linkTargets(outbound).length > 1
+  ) {
+    throw new Error("invalid-legacy-proxy-settings");
+  }
+  if (proxy?.transportLayer !== true) {
+    return outbound;
+  }
+  const stream = object(outbound.streamSettings);
+  return {
+    ...rest,
+    streamSettings: { ...stream, sockopt: { ...object(stream?.sockopt), dialerProxy: tag } },
+  };
+}
+
 export function assertExactKey(record: JsonObject | undefined, field: string): void {
   const normalized = field.toUpperCase();
   if (

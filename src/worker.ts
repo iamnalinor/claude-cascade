@@ -1,7 +1,7 @@
 import { autoCascade } from "./auto-cascade.ts";
 import { type Compiled, compileSource, mergeSources } from "./compile-source.ts";
 import { validateBridge } from "./exit-bridge.ts";
-import { object, parseJson } from "./json-value.ts";
+import { type JsonObject, object, objects, parseJson } from "./json-value.ts";
 import { type SourceCache, type TaskContext } from "./source-cache.ts";
 import { type Bindings, sources, textBinding } from "./source-config.ts";
 import { type Fetcher, IncompatibleSource } from "./source-request.ts";
@@ -66,6 +66,26 @@ function json(value: unknown, status: number, headers?: Headers): Response {
   return Response.json(value, { headers: responseHeaders, status });
 }
 
+function renderProfiles(
+  compiled: JsonObject[],
+  bridge: JsonObject,
+  request: Request,
+): { profiles: JsonObject[]; rejected: number } {
+  const canUseLegacyProxy = /^Throne\/1\.2\.4(?:$|[\s(/-])/iu.test(
+    request.headers.get("user-agent") ?? "",
+  );
+  const profiles = canUseLegacyProxy
+    ? compiled
+    : compiled.filter((profile) =>
+        objects(profile.outbounds).every((outbound) => outbound.proxySettings === undefined),
+      );
+  const automatic = autoCascade(compiled, bridge, canUseLegacyProxy);
+  return {
+    profiles: automatic === undefined ? profiles : [...profiles, automatic],
+    rejected: compiled.length - profiles.length,
+  };
+}
+
 async function subscription(
   request: Request,
   environment: Bindings,
@@ -103,18 +123,15 @@ async function subscription(
       }
     }
   }
-  const profiles = mergeSources(results);
+  const output = renderProfiles(mergeSources(results), bridge, request);
+  const { profiles } = output;
   if (profiles.length === 0) {
     return json(
       { error: incompatible > 0 ? "source-incompatible" : "subscription-unavailable" },
       502,
     );
   }
-  const automatic = autoCascade(profiles, bridge);
-  if (automatic !== undefined) {
-    profiles.push(automatic);
-  }
-  const rejected = results.reduce((total, result) => total + result.rejected, 0);
+  const rejected = results.reduce((total, result) => total + result.rejected, output.rejected);
   return json(
     profiles,
     200,

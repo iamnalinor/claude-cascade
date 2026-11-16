@@ -1,19 +1,23 @@
 import { endpoints, isProxy } from "./endpoints.ts";
 import { canonical, type JsonObject, object, objects, string } from "./json-value.ts";
 import { linkTargets } from "./outbound-graph.ts";
-import { automaticInbounds, makeExit, russianRules } from "./routing.ts";
+import { automaticInbounds, makeExit, russianRules, targetRules } from "./routing.ts";
 
 const EXIT_PREFIX = "auto-exit-";
 const BALANCER_TAG = "auto-cascade";
 const BLOCK_TAG = "auto-block";
 const RU_TAG = "cascade-ru-direct";
 
-export function autoCascade(profiles: JsonObject[], bridge: JsonObject): JsonObject | undefined {
+export function autoCascade(
+  profiles: JsonObject[],
+  bridge: JsonObject,
+  canUseLegacyProxy = false,
+): JsonObject | undefined {
   const outbounds: JsonObject[] = [{ protocol: "blackhole", tag: BLOCK_TAG }];
   const seen = new Set<string>();
   const exitEndpoints = new Set(endpoints(bridge).map((endpoint) => JSON.stringify(endpoint)));
   for (const profile of profiles) {
-    for (const chain of firstHops(profile, exitEndpoints)) {
+    for (const chain of firstHops(profile, exitEndpoints, canUseLegacyProxy)) {
       const key = canonical(chain);
       if (seen.has(key)) {
         continue;
@@ -58,7 +62,7 @@ export function autoCascade(profiles: JsonObject[], bridge: JsonObject): JsonObj
       ],
       domainStrategy: "IPOnDemand",
       rules: [
-        { balancerTag: BALANCER_TAG, domain: ["full:ip.net.coffee"], type: "field" },
+        ...targetRules({ balancerTag: BALANCER_TAG }),
         ...russianRules(RU_TAG),
         { balancerTag: BALANCER_TAG, network: "tcp,udp", type: "field" },
       ],
@@ -96,7 +100,11 @@ function collect(
   return legs.map((leg, index) => remap(leg, tags, `leg-${index}`));
 }
 
-function firstHops(profile: JsonObject, exitEndpoints: ReadonlySet<string>): JsonObject[][] {
+function firstHops(
+  profile: JsonObject,
+  exitEndpoints: ReadonlySet<string>,
+  canUseLegacyProxy: boolean,
+): JsonObject[][] {
   // The final two outbounds of each compiled profile are the injected EXIT2 and Russian direct.
   const original = objects(profile.outbounds).slice(0, -2);
   const byTag = new Map(original.map((outbound) => [string(outbound.tag), outbound]));
@@ -107,6 +115,9 @@ function firstHops(profile: JsonObject, exitEndpoints: ReadonlySet<string>): Jso
     }
     try {
       const chain = collect(outbound, byTag);
+      if (!canUseLegacyProxy && chain.some((leg) => leg.proxySettings !== undefined)) {
+        continue;
+      }
       const proxyEndpoints = chain.filter(isProxy).flatMap(endpoints);
       if (proxyEndpoints.some((endpoint) => exitEndpoints.has(JSON.stringify(endpoint)))) {
         continue;
