@@ -1,0 +1,20 @@
+{
+  "protocol": "vless",
+  "settings": {
+    "vnext": [{
+      "address": {{ exit_address | to_json }},
+      "port": {{ configured_exit_port | int }},
+      "users": [{ "id": {{ exit_material.uuid | to_json }}, "encryption": "none" }]
+    }]
+  },
+  "streamSettings": {
+    "network": "raw",
+    "security": "reality",
+    "realitySettings": {
+      "serverName": {{ reality_server_name | to_json }},
+      "fingerprint": "chrome",
+      "publicKey": {{ exit_material.public_key | to_json }},
+      "shortId": {{ exit_material.short_id | to_json }}
+    }
+  }
+}

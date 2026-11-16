@@ -1,0 +1,34 @@
+{
+  "log": { "loglevel": "warning", "access": "none" },
+  "inbounds": [
+    {
+      "tag": "exit-in",
+      "listen": {{ configured_exit_listen | to_json }},
+      "port": {{ configured_exit_port | int }},
+      "protocol": "vless",
+      "settings": {
+        "decryption": "none",
+        "clients": [{ "id": {{ exit_material.uuid | to_json }} }]
+      },
+      "streamSettings": {
+        "network": "raw",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "target": {{ (reality_target_host ~ ':' ~ configured_reality_target_port) | to_json }},
+          "serverNames": [{{ reality_server_name | to_json }}],
+          "privateKey": {{ exit_material.private_key | to_json }},
+          "shortIds": [{{ exit_material.short_id | to_json }}]
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    { "protocol": "freedom", "tag": "exit-internet" },
+    { "protocol": "blackhole", "tag": "exit-block" }
+  ],
+  "routing": {
+    "domainStrategy": "IPOnDemand",
+    "rules": [{ "type": "field", "ip": ["geoip:private"], "outboundTag": "exit-block" }]
+  }
+}

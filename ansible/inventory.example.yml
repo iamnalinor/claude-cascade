@@ -1,0 +1,13 @@
+all:
+  children:
+    exit_nodes:
+      hosts:
+        exit2:
+          ansible_host: 203.0.113.20
+          ansible_user: deploy
+          # Можно указать IP. При использовании DNS запись должна вести напрямую на VPS.
+          exit_address: 203.0.113.20
+          exit_port: 443
+          reality_target_host: tls.example.net
+          reality_server_name: tls.example.net
+          reality_target_port: 443

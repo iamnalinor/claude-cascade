@@ -1,0 +1,46 @@
+{
+  "name": "happ-cascade",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.2",
+  "scripts": {
+    "dev": "bun run build && bunx --no-install wrangler dev --no-bundle",
+    "deploy": "bun run build && bunx --no-install wrangler deploy --no-bundle",
+    "lint": "bun run lint:format && bun run lint:eslint && bun run typecheck && bun run lint:knip && bun run lint:dup && bun run lint:arch",
+    "lint:format": "bunx --no-install biome format .",
+    "lint:format:fix": "bunx --no-install biome format --write .",
+    "lint:eslint": "bunx --bun --no-install eslint --max-warnings 0 .",
+    "lint:knip": "bunx --bun --no-install knip --no-progress",
+    "lint:dup": "bunx --bun --no-install jscpd",
+    "lint:arch": "bunx --bun --no-install depcruise src --config .dependency-cruiser.mjs",
+    "typecheck": "bunx --bun --no-install tsc",
+    "test": "bun test",
+    "build": "bun build src/worker.ts --target=browser --format=esm --outfile=dist/worker.js",
+    "check:xray": "bun --no-env-file scripts/check-xray.ts"
+  },
+  "dependencies": {
+    "zod": "4.6.6"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.4",
+    "@eslint/js": "10.0.1",
+    "@tsconfig/strictest": "2.0.8",
+    "@types/bun": "1.4.2",
+    "dependency-cruiser": "18.7.0",
+    "eslint": "10.13.0",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-import-x": "4.17.1",
+    "eslint-plugin-perfectionist": "5.13.0",
+    "eslint-plugin-regexp": "3.3.2",
+    "eslint-plugin-security": "4.2.0",
+    "eslint-plugin-sonarjs": "4.2.2",
+    "eslint-plugin-unicorn": "79.0.0",
+    "jiti": "2.7.0",
+    "jscpd": "5.4.2",
+    "knip": "6.43.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1",
+    "wrangler": "4.156.0"
+  }
+}

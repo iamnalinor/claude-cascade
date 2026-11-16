@@ -1,0 +1,9 @@
+node_modules/
+.wrangler/
+.cache/
+.env*
+.dev.vars*
+.local/
+ansible/inventory.yml
+ansible/vault.yml
+dist/
