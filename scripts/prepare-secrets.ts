@@ -3,8 +3,30 @@ import { type JsonObject, object, objects, parseJson } from "../src/json-value.t
 import { parseSubscription } from "../src/subscription-format.ts";
 import { LOCAL, preparePrivateDirectory, readPrivate, writePrivate } from "./private-files.ts";
 
+function forwardProxy(url: URL): JsonObject {
+  if (!["", "/"].includes(url.pathname) || url.search !== "" || url.hash !== "") {
+    throw new Error("invalid-forward-proxy-url");
+  }
+  const isTls = url.protocol === "https:";
+  const isSocks = url.protocol.startsWith("socks");
+  const address = url.hostname.replaceAll(/^\[|\]$/gu, "");
+  const port = url.port === "" ? (isSocks ? 1080 : isTls ? 443 : 80) : Number(url.port);
+  const users =
+    url.username === "" && url.password === ""
+      ? []
+      : [{ user: decodeURIComponent(url.username), pass: decodeURIComponent(url.password) }];
+  return {
+    protocol: isSocks ? "socks" : "http",
+    settings: { servers: [{ address, port, users }] },
+    ...(isTls && { streamSettings: { security: "tls", tlsSettings: { serverName: address } } }),
+  };
+}
+
 function readBridge(raw: string): JsonObject | undefined {
   const input = raw.trim();
+  if (/^(?:https?|socks5h?):\/\//iu.test(input)) {
+    return forwardProxy(new URL(input));
+  }
   if (!input.startsWith("vless://")) {
     return object(parseJson(input));
   }
@@ -18,7 +40,7 @@ function readBridge(raw: string): JsonObject | undefined {
 
 const bridgePath = Bun.argv[2];
 if (bridgePath === undefined) {
-  console.error("Usage: bun scripts/prepare-secrets.ts <outbound.json or vless-link.txt>");
+  console.error("Usage: bun scripts/prepare-secrets.ts <outbound.json or proxy-link.txt>");
   process.exit(2);
 }
 try {

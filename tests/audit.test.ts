@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { objects, parseJson } from "../src/json-value.ts";
+import { object, objects, parseJson } from "../src/json-value.ts";
 import { createWorker } from "../src/worker.ts";
 import { BRIDGE, env, LINK, MAIN, request, UUID } from "./fixtures.ts";
 
@@ -25,6 +25,70 @@ test("requires a single verified RAW transport for EXIT2", async () => {
   }
   expect(wasFetched).toBe(false);
 });
+
+test("chains a Hysteria2 EXIT2 through a first-hop dialer in both modes", async () => {
+  const bridge = {
+    protocol: "hysteria",
+    settings: { address: "exit.example.com", port: 443, version: 2 },
+    streamSettings: {
+      hysteriaSettings: { auth: "fixture", version: 2 },
+      network: "hysteria",
+      security: "tls",
+      tlsSettings: { serverName: "exit.example.com" },
+    },
+  };
+  const worker = createWorker({
+    fetcher: () => Promise.resolve(Response.json({ outbounds: [MAIN] })),
+  });
+  const response = await worker.fetch(request(), {
+    ...env(),
+    EXIT_OUTBOUND: JSON.stringify(bridge),
+  });
+  expect(response.status).toBe(200);
+  const profiles = objects(parseJson(await response.text()));
+  expect(profiles).toHaveLength(2);
+  for (const profile of profiles) {
+    const outbounds = objects(profile.outbounds);
+    const exit = outbounds.find((outbound) => outbound.protocol === "hysteria");
+    expect(exit).toMatchObject(bridge);
+    const dialer = object(object(exit?.streamSettings)?.sockopt)?.dialerProxy;
+    expect(outbounds.find((outbound) => outbound.tag === dialer)?.protocol).toBe("vless");
+  }
+  const unsigned = { ...bridge.streamSettings.tlsSettings, allowInsecure: true };
+  const unsafe = { ...bridge, streamSettings: { ...bridge.streamSettings, tlsSettings: unsigned } };
+  const rejected = await worker.fetch(request(), {
+    ...env(),
+    EXIT_OUTBOUND: JSON.stringify(unsafe),
+  });
+  expect(rejected.status).toBe(503);
+});
+
+test.each(["http", "socks"])(
+  "chains a %s proxy as EXIT2 without an explicit transport",
+  async (protocol) => {
+    const bridge = {
+      protocol,
+      settings: { servers: [{ address: "proxy.example.com", port: 1080 }] },
+    };
+    const worker = createWorker({
+      fetcher: () => Promise.resolve(Response.json({ outbounds: [MAIN] })),
+    });
+    const response = await worker.fetch(request(), {
+      ...env(),
+      EXIT_OUTBOUND: JSON.stringify(bridge),
+    });
+    expect(response.status).toBe(200);
+    const profiles = objects(parseJson(await response.text()));
+    expect(profiles).toHaveLength(2);
+    for (const profile of profiles) {
+      const outbounds = objects(profile.outbounds);
+      const exit = outbounds.find((outbound) => outbound.protocol === protocol);
+      expect(exit).toMatchObject(bridge);
+      const dialer = object(object(exit?.streamSettings)?.sockopt)?.dialerProxy;
+      expect(outbounds.find((outbound) => outbound.tag === dialer)?.protocol).toBe("vless");
+    }
+  },
+);
 
 test("accepts local client inbounds and keeps provider control services out of profiles", async () => {
   const profiles = [

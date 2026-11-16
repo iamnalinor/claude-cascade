@@ -98,8 +98,12 @@ export function cascade(
 
 export function makeExit(bridge: JsonObject, main: string, tag: string): JsonObject {
   const stream = object(bridge.streamSettings);
+  const protocol = string(bridge.protocol);
+  if (protocol === undefined) {
+    throw new Error("missing-exit-protocol");
+  }
   return {
-    protocol: "vless",
+    protocol,
     settings: bridge.settings ?? {},
     streamSettings: { ...stream, sockopt: { ...object(stream?.sockopt), dialerProxy: main } },
     tag,
