@@ -3,45 +3,7 @@ import { expect, test } from "bun:test";
 import { object, objects, parseJson } from "../src/json-value.ts";
 import { type SourceCache } from "../src/source-cache.ts";
 import { createWorker } from "../src/worker.ts";
-
-const TOKEN = "fixture-token".repeat(4);
-const UUID = "9b00c97f-f841-4625-b970-719534722e9f";
-const MAIN = {
-  protocol: "vless",
-  settings: { address: "main.example.com", id: UUID, port: 443 },
-  streamSettings: { network: "xhttp", security: "tls", xhttpSettings: { path: "/test" } },
-  tag: "provider-main",
-};
-const BRIDGE = {
-  protocol: "vless",
-  settings: { address: "exit.example.com", id: UUID, port: 443 },
-  streamSettings: { network: "raw", security: "tls" },
-};
-const LINK = `vless://${UUID}@main.example.com:443?type=raw&security=tls#Fixture`;
-
-function env(): Record<string, unknown> {
-  return {
-    EXIT_OUTBOUND: JSON.stringify(BRIDGE),
-    SOURCES: [
-      { id: "a", urlSecret: "UPSTREAM_A" },
-      { id: "b", urlSecret: "UPSTREAM_B" },
-    ],
-    SUB_ACCESS_TOKEN: TOKEN,
-    UPSTREAM_A: "https://one.example.com/secret-a",
-    UPSTREAM_B: "https://two.example.com/secret-b",
-  };
-}
-
-function request(hwid = "fixture-device", token = TOKEN): Request {
-  return new Request(`https://worker.example.com/sub/${token}`, {
-    headers: {
-      Authorization: "Bearer must-not-forward",
-      Cookie: "must-not-forward",
-      "User-Agent": "Happ/example",
-      "X-HWID": hwid,
-    },
-  });
-}
+import { env, LINK, MAIN, request, UUID } from "./fixtures.ts";
 
 test("rejects invalid tokens before touching upstream", async () => {
   let isCalled = false;
@@ -175,7 +137,12 @@ test("isolates opt-in cache between identities and returns no profile on missing
 
 test("rejects a broken chain and supports the observed masked links", async () => {
   const broken = {
-    outbounds: [{ ...MAIN, streamSettings: { sockopt: { dialerProxy: "provider-main" } } }],
+    outbounds: [
+      {
+        ...MAIN,
+        streamSettings: { ...MAIN.streamSettings, sockopt: { dialerProxy: "provider-main" } },
+      },
+    ],
   };
   const maskedLink = `${LINK.split("#", 1)[0]}&fm=${encodeURIComponent(
     JSON.stringify({
@@ -216,7 +183,7 @@ test("renders compatible XDNS and identical names across client versions", async
       resolvers: [{ type: "udp", settings: { addr: "192.0.2.53:53" } }],
     },
   };
-  const link = `vless://${UUID}@main.example.com:443?type=kcp&fm=${encodeURIComponent(JSON.stringify(mask))}#Fixture`;
+  const link = `vless://${UUID}@10.0.0.10:443?type=kcp&fm=${encodeURIComponent(JSON.stringify(mask))}#Fixture`;
   const config = { ...env(), SOURCES: [{ id: "a", urlSecret: "UPSTREAM_A" }] };
   const worker = createWorker({ fetcher: () => Promise.resolve(new Response(link)) });
 
@@ -227,7 +194,7 @@ test("renders compatible XDNS and identical names across client versions", async
     expect(response.status).toBe(200);
     const [profile] = objects(parseJson(await response.text()));
     const [main] = objects(profile?.outbounds);
-    expect(profile?.remarks).toBe("Fixture · VLESS main.example.com:443");
+    expect(profile?.remarks).toBe("Fixture · VLESS 10.0.0.10:443");
     expect(main?.streamSettings).toHaveProperty("finalmask.udp[0].settings", {
       domains: ["tunnel.example.com:a"],
       resolvers: ["tunnel.example.com:a+udp://192.0.2.53:53"],
@@ -238,7 +205,7 @@ test("renders compatible XDNS and identical names across client versions", async
   expect(currentResponse.status).toBe(200);
   const [currentProfile] = objects(parseJson(await currentResponse.text()));
   const [currentMain] = objects(currentProfile?.outbounds);
-  expect(currentProfile?.remarks).toBe("Fixture · VLESS main.example.com:443");
+  expect(currentProfile?.remarks).toBe("Fixture · VLESS 10.0.0.10:443");
   expect(currentMain?.streamSettings).toHaveProperty("finalmask.udp[0].settings", {
     domains: [
       {

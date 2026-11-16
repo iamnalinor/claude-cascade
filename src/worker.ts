@@ -1,6 +1,6 @@
 import { type Compiled, compileSource, mergeSources } from "./compile-source.ts";
+import { validateBridge } from "./exit-bridge.ts";
 import { object, parseJson } from "./json-value.ts";
-import { validateBridge } from "./routing.ts";
 import { type SourceCache, type TaskContext } from "./source-cache.ts";
 import { type Bindings, sources, textBinding } from "./source-config.ts";
 import { type Fetcher, IncompatibleSource } from "./source-request.ts";

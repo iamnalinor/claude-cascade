@@ -116,12 +116,33 @@
         - { path: /etc/happ-exit, group: happ-exit, mode: "0750" }
 
     - name: Check whether this pinned release is already installed
-      ansible.builtin.stat:
-        path: "{{ xray_release_dir }}/.installed"
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_facts.python.executable }}"
+          - -c
+          - |
+            import os, sys
+            from pathlib import Path
+            directory = Path(sys.argv[1])
+            try:
+                complete = (directory / ".installed").read_text().strip() == sys.argv[2]
+                complete = complete and os.access(directory / "xray", os.X_OK)
+                complete = complete and all(
+                    (directory / name).stat().st_size > 0
+                    for name in ("xray", "geoip.dat", "geosite.dat")
+                )
+            except FileNotFoundError:
+                complete = False
+            sys.exit(0 if complete else 1)
+          - "{{ xray_release_dir }}"
+          - "{{ xray_version }}"
       register: xray_install
+      changed_when: false
+      failed_when: xray_install.rc not in [0, 1]
+      check_mode: false
 
     - name: Install the pinned Xray archive
-      when: not xray_install.stat.exists and not ansible_check_mode
+      when: xray_install.rc != 0 and not ansible_check_mode
       block:
         - name: Download and verify Xray
           ansible.builtin.get_url:
@@ -159,7 +180,7 @@
             mode: "0644"
 
     - name: Configure the Xray service
-      when: not ansible_check_mode or xray_install.stat.exists
+      when: not ansible_check_mode or xray_install.rc == 0
       block:
         - name: Generate stable keys and credentials on first install
           ansible.builtin.command:
@@ -183,7 +204,10 @@
                         json.dump(state, handle)
                         handle.flush()
                         os.fsync(handle.fileno())
-                    os.replace(temporary, path)
+                    try:
+                        os.link(temporary, path)
+                    except FileExistsError:
+                        pass
                     dir_fd = os.open(os.path.dirname(path), os.O_DIRECTORY)
                     try:
                         os.fsync(dir_fd)
@@ -197,30 +221,43 @@
             creates: /etc/happ-exit/identity.json
           no_log: true
 
-        - name: Read server identity
-          ansible.builtin.slurp:
-            src: /etc/happ-exit/identity.json
+        - name: Read only the client fields of the server identity
+          ansible.builtin.command:
+            argv:
+              - "{{ ansible_facts.python.executable }}"
+              - -c
+              - |
+                import json, sys
+                with open(sys.argv[1]) as handle:
+                    state = json.load(handle)
+                print(json.dumps({key: state[key] for key in ("public_key", "short_id", "uuid")}))
+              - /etc/happ-exit/identity.json
           register: exit_identity
+          changed_when: false
+          check_mode: false
           no_log: true
 
         - name: Parse server identity
           ansible.builtin.set_fact:
-            exit_material: "{{ exit_identity.content | b64decode | from_json }}"
+            exit_material: "{{ exit_identity.stdout | from_json }}"
           no_log: true
 
-        - name: Validate and install the Xray configuration
-          ansible.builtin.template:
-            src: config.json.j2
-            dest: /etc/happ-exit/config.json
-            owner: root
-            group: happ-exit
-            mode: "0640"
-            validate: "{{ xray_release_dir }}/xray run -test -config %s"
+        - name: Insert the private key and validate the configuration on the exit
+          ansible.builtin.command:
+            argv:
+              - "{{ ansible_facts.python.executable }}"
+              - -c
+              - "{{ lookup('ansible.builtin.file', 'files/install-config.py') }}"
+              - "{{ xray_release_dir }}/xray"
+              - /etc/happ-exit
+            stdin: "{{ lookup('ansible.builtin.template', 'templates/config.json.j2') | to_json }}"
           environment:
             XRAY_LOCATION_ASSET: "{{ xray_release_dir }}"
+          register: exit_config
+          changed_when: exit_config.stdout == 'changed'
           notify: Restart happ-exit
           no_log: true
-          diff: false
+          when: not ansible_check_mode
 
         - name: Install the systemd unit
           ansible.builtin.template:

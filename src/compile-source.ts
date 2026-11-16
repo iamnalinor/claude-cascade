@@ -13,6 +13,8 @@ import { parseSubscription } from "./subscription-format.ts";
 
 const PROVIDER_BINDINGS = new Set(["install-id", "installid", "provider-id", "providerid"]);
 const RESPONSE_CONTROLS = [...PROVIDER_BINDINGS, "subscription-always-hwid-enable", "routing"];
+const MAX_COMPILED_BYTES = 2 * 1024 * 1024;
+const encoder = new TextEncoder();
 
 export type Compiled = { profiles: JsonObject[]; rejected: number };
 type Dependencies = {
@@ -110,10 +112,17 @@ function fromBody(body: string, source: Source, context: RequestContext): Compil
   supportedHeaders(parsed.metadata);
   const profiles: JsonObject[] = [];
   let rejected = parsed.rejected;
+  let remaining = MAX_COMPILED_BYTES;
   for (const profile of parsed.profiles) {
     verifyProfileIdentity(profile);
     try {
-      profiles.push(cascade(profile, context.bridge, options));
+      const result = cascade(profile, context.bridge, options);
+      const bytes = encoder.encode(JSON.stringify(result)).byteLength;
+      if (bytes > remaining) {
+        throw new Error("compiled-source-limit");
+      }
+      profiles.push(result);
+      remaining -= bytes;
     } catch {
       rejected++;
     }
@@ -124,7 +133,7 @@ function fromBody(body: string, source: Source, context: RequestContext): Compil
   return { profiles, rejected };
 }
 
-function supportedHeaders(headers: Headers): void {
+function supportedHeaders(headers: Pick<Headers, "has">): void {
   if (RESPONSE_CONTROLS.some((name) => headers.has(name))) {
     throw new IncompatibleSource("provider-bound-subscription");
   }

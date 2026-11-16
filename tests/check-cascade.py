@@ -101,7 +101,7 @@ def client_config(ports, ca):
     const settings = (address, port) => ({vnext:[{address, port, users:[user]}]});
     const profile = {
       inbounds:[{listen:'127.0.0.1',port:socks,protocol:'socks'}],
-      outbounds:[{protocol:'vless',settings:settings('192.0.2.10',first),tag:'main'}],
+      outbounds:[{protocol:'vless',settings:settings('10.0.0.10',first),tag:'main'}],
     };
     const bridge = {
       protocol:'vless',
@@ -164,7 +164,8 @@ def main():
                 "certificateFile": str(certificate), "keyFile": str(key),
             }]},
         }
-        start_xray(stack, state, "first", server_config(first, "127.0.0.2", [second, echo_port]), first)
+        first_config = server_config(first, "127.0.0.2", [second, echo_port])
+        first_process = start_xray(stack, state, "first", first_config, first)
         exit_process = start_xray(stack, state, "exit", exit_config, second)
         config = client_config((proxy, first, second), certificate)
         start_xray(stack, state, "client", config, proxy)
@@ -176,6 +177,11 @@ def main():
                 print((state / f"{label}.log").read_text(errors="replace"))
             raise
         assert "127.0.0.2" in (state / "exit.access").read_text(), "Exit did not observe the first hop"
+        stop(first_process)
+        assert request(TARGET, proxy, echo_port).returncode != 0, "Client dialled EXIT2 after first-hop failure"
+        assert request(IP_CHECK, proxy, echo_port).returncode != 0, "IP check bypassed the first hop"
+        start_xray(stack, state, "first-restored", first_config, first)
+        assert request(TARGET, proxy, echo_port).stdout == "127.0.0.3"
         stop(exit_process)
         assert request(TARGET, proxy, echo_port).returncode != 0, "Target unexpectedly survived an exit failure"
         assert request(IP_CHECK, proxy, echo_port).returncode != 0, "IP check unexpectedly survived an exit failure"

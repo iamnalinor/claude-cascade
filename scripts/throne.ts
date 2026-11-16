@@ -1,17 +1,17 @@
 import { Database } from "bun:sqlite";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { homedir, release } from "node:os";
 import path from "node:path";
 
+import { validateBridge } from "../src/exit-bridge.ts";
 import { object, parseJson } from "../src/json-value.ts";
-import { validateBridge } from "../src/routing.ts";
 import { sources } from "../src/source-config.ts";
 import { fetchSource, IncompatibleSource, readSource } from "../src/source-request.ts";
 import { parseSubscription } from "../src/subscription-format.ts";
+import { LOCAL, preparePrivateDirectory, readPrivate, writePrivate } from "./private-files.ts";
 
 type Candidate = { gid: number; outbound_json: string };
 type Group = { id: number; url: string };
-const LOCAL = ".local";
 const DB_PATH = path.join(homedir(), ".config/Throne/config/throne.db");
 const HEADERS = {
   hwid: "x-hwid",
@@ -45,6 +45,19 @@ function findBridge(database: Database, groups: Group[]): Candidate | undefined 
   });
 }
 
+async function hasSupportedStagingBridge(): Promise<boolean> {
+  try {
+    const outbound = object(parseJson(await readPrivate("staging-outbound.json")));
+    if (outbound === undefined) {
+      return false;
+    }
+    validateBridge(outbound);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function machineId(): Promise<string> {
   for (const name of ["/etc/machine-id", "/var/lib/dbus/machine-id"]) {
     try {
@@ -61,7 +74,7 @@ async function machineId(): Promise<string> {
 }
 
 async function main(): Promise<void> {
-  await mkdir(LOCAL, { mode: 0o700, recursive: true });
+  await preparePrivateDirectory();
   await access(DB_PATH);
   using database = new Database(DB_PATH, { readonly: true });
   const fromWorker = Bun.argv.indexOf("--worker");
@@ -100,7 +113,7 @@ async function main(): Promise<void> {
   console.log(
     JSON.stringify({
       groups: groups.map(({ id }) => id),
-      stagingBridge: isStagingExists || bridge !== undefined,
+      stagingBridge: isStagingExists ? await hasSupportedStagingBridge() : bridge !== undefined,
     }),
   );
   if (Bun.argv.includes("--probe")) {
@@ -170,7 +183,7 @@ async function smokeWorker(origin: string, identity: Headers): Promise<void> {
   ) {
     throw new Error("workers-dev-origin-required");
   }
-  const secrets = object(parseJson(await Bun.file(path.join(LOCAL, "worker-secrets.json")).text()));
+  const secrets = object(parseJson(await readPrivate("worker-secrets.json")));
   const token = secrets?.SUB_ACCESS_TOKEN;
   if (typeof token !== "string") {
     throw new TypeError("missing-subscription-token");
@@ -260,10 +273,6 @@ async function workerHealth(origin: URL): Promise<Response> {
     await Bun.sleep(300);
   }
   return await fetch(health, { signal: AbortSignal.timeout(8000) });
-}
-
-async function writePrivate(name: string, content: string): Promise<void> {
-  await writeFile(path.join(LOCAL, name), content, { mode: 0o600 });
 }
 
 try {

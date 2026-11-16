@@ -1,9 +1,8 @@
 import { endpoints, isKnown, isProxy } from "./endpoints.ts";
 import { type JsonObject, object, objects, string } from "./json-value.ts";
+import { assertExactKey, indexOutbounds, validateChains } from "./outbound-graph.ts";
 import { adaptXdns } from "./xdns-compat.ts";
 
-const EXIT_TAG = "cascade-exit2";
-const RU_TAG = "cascade-ru-direct";
 const TARGETS = [
   "domain:anthropic.com",
   "domain:claude.ai",
@@ -15,7 +14,23 @@ const TARGETS = [
 ];
 const RU_DOMAINS = ["geosite:category-ru", "domain:ru", "domain:su", "domain:xn--p1ai"];
 const SNIFF_FOR_ROUTING = ["http", "tls", "quic"];
-
+const LOCAL_INBOUNDS = new Set(["dokodemo-door", "http", "mixed", "socks", "tunnel"]);
+const LOOPBACK_LISTEN = new Set(["127.0.0.1", "::1", "localhost"]);
+const PROFILE_FIELDS = new Set([
+  "burstObservatory",
+  "dns",
+  "fakeDns",
+  "fakedns",
+  "inbounds",
+  "log",
+  "meta",
+  "observatory",
+  "outbounds",
+  "policy",
+  "remarks",
+  "routing",
+  "stats",
+]);
 type CascadeOptions = { legacyXdns?: boolean; mainTag?: string };
 
 export function cascade(
@@ -23,10 +38,18 @@ export function cascade(
   bridge: JsonObject,
   options: CascadeOptions = {},
 ): JsonObject {
+  if (Object.keys(profile).some((key) => !PROFILE_FIELDS.has(key))) {
+    throw new Error("unsupported-profile-fields");
+  }
   const original = objects(profile.outbounds);
   const main = selectMain(original, options.mainTag);
   const graph = indexOutbounds(original);
-  const tagged = withMainTag(main, graph);
+  const routing = object(profile.routing) ?? {};
+  for (const field of ["balancers", "domainStrategy", "rules", "script"]) {
+    assertExactKey(routing, field);
+  }
+  const [exitTag, ruTag, defaultMainTag] = cascadeTags(profile, routing, graph);
+  const mainTag = string(main.tag) ?? defaultMainTag;
   const mainEndpoints = endpoints(main);
   const exitEndpoints = endpoints(bridge);
   if (
@@ -36,48 +59,64 @@ export function cascade(
   ) {
     throw new Error("same-first-and-second-hop");
   }
-  const routing = object(profile.routing) ?? {};
   const rules = validateRules(routing, graph, main);
-  for (const tag of graph.keys()) {
-    visit(tag, graph, new Set());
-  }
+  validateChains(graph, original);
   const inbounds = objects(profile.inbounds ?? defaultInbounds());
   const entry = mainEndpoints[0];
-  const outbounds = original.map((outbound) => (outbound === main ? tagged : outbound));
-  outbounds.push(makeExit(bridge, string(tagged.tag) ?? "cascade-main"), {
+  const outbounds = original.map((outbound) =>
+    outbound === main ? { ...main, tag: mainTag } : outbound,
+  );
+  outbounds.push(makeExit(bridge, mainTag, exitTag), {
     protocol: "freedom",
-    tag: RU_TAG,
+    tag: ruTag,
   });
+  const { log: _log, ...profileSettings } = profile;
   return {
-    ...profile,
+    ...profileSettings,
     ...(entry !== undefined && { remarks: labelProfile(profile, main, entry) }),
-    inbounds: (inbounds.length === 0 ? defaultInbounds() : inbounds).map(enableSniffing),
+    inbounds: (inbounds.length === 0 ? defaultInbounds() : inbounds).map(localInbound),
     outbounds: outbounds.map((outbound) => adaptXdns(outbound, options.legacyXdns === true)),
     routing: {
       ...routing,
       domainStrategy: "IPOnDemand",
       rules: [
-        { domain: TARGETS, outboundTag: EXIT_TAG, type: "field" },
-        { domain: ["full:ip.net.coffee"], outboundTag: EXIT_TAG, type: "field" },
-        { domain: RU_DOMAINS, outboundTag: RU_TAG, type: "field" },
-        { ip: ["geoip:ru"], outboundTag: RU_TAG, type: "field" },
+        { domain: TARGETS, outboundTag: exitTag, type: "field" },
+        { domain: ["full:ip.net.coffee"], outboundTag: exitTag, type: "field" },
+        { domain: RU_DOMAINS, outboundTag: ruTag, type: "field" },
+        { ip: ["geoip:ru"], outboundTag: ruTag, type: "field" },
         ...rules,
       ],
     },
   };
 }
 
-export function validateBridge(bridge: JsonObject): JsonObject {
-  const stream = object(bridge.streamSettings);
-  if (
-    bridge.protocol !== "vless" ||
-    !["reality", "tls"].includes(string(stream?.security) ?? "") ||
-    linkTargets(bridge).length > 0
-  ) {
-    throw new Error("invalid-bridge");
+function cascadeTags(
+  profile: JsonObject,
+  routing: JsonObject,
+  graph: ReadonlyMap<string, string[]>,
+): [string, string, string] {
+  const monitors = [object(profile.observatory), object(profile.burstObservatory)];
+  const selectors = [
+    ...objects(routing.balancers ?? []).map((balancer) => fieldValue(balancer, "selector")),
+    ...monitors.map((monitor) => fieldValue(monitor, "subjectSelector")),
+  ]
+    .flatMap((value) => (Array.isArray(value) ? value : []))
+    .filter((value) => typeof value === "string");
+  for (const prefix of ["cascade-", "happ-cascade-", "_cascade-"]) {
+    const tags: [string, string, string] = [
+      `${prefix}exit2`,
+      `${prefix}ru-direct`,
+      `${prefix}main`,
+    ];
+    if (
+      tags.every(
+        (tag) => !graph.has(tag) && selectors.every((selector) => !tag.startsWith(selector)),
+      )
+    ) {
+      return tags;
+    }
   }
-  endpoints(bridge);
-  return bridge;
+  throw new Error("conflicting-cascade-tags");
 }
 
 function defaultInbounds(): JsonObject[] {
@@ -87,38 +126,9 @@ function defaultInbounds(): JsonObject[] {
   ];
 }
 
-function enableSniffing(inbound: JsonObject): JsonObject {
-  if (
-    !["dokodemo-door", "http", "mixed", "socks", "tun"].includes(string(inbound.protocol) ?? "")
-  ) {
-    return inbound;
-  }
-  const sniffing = object(inbound.sniffing) ?? {};
-  const existing = Array.isArray(sniffing.destOverride) ? sniffing.destOverride : [];
-  return {
-    ...inbound,
-    sniffing: {
-      ...sniffing,
-      destOverride: [...new Set([...existing, ...SNIFF_FOR_ROUTING])],
-      enabled: true,
-      routeOnly: sniffing.enabled === true ? (sniffing.routeOnly ?? false) : true,
-    },
-  };
-}
-
-function indexOutbounds(outbounds: JsonObject[]): Map<string, string[]> {
-  const graph = new Map<string, string[]>();
-  for (const outbound of outbounds) {
-    const tag = string(outbound.tag);
-    if (tag === undefined) {
-      continue;
-    }
-    if (graph.has(tag) || tag === EXIT_TAG || tag === RU_TAG) {
-      throw new Error("conflicting-outbound-tag");
-    }
-    graph.set(tag, linkTargets(outbound));
-  }
-  return graph;
+function fieldValue(record: JsonObject | undefined, field: string): JsonObject[string] | undefined {
+  assertExactKey(record, field);
+  return record?.[field];
 }
 
 function labelProfile(
@@ -134,23 +144,45 @@ function labelProfile(
   return title === undefined ? label : `${title} · ${label}`;
 }
 
-function linkTargets(outbound: JsonObject): string[] {
-  const stream = object(outbound.streamSettings);
-  const tags = [
-    string(object(outbound.proxySettings)?.tag),
-    string(object(stream?.sockopt)?.dialerProxy),
-    outbound.protocol === "loopback" ? string(object(outbound.settings)?.outboundTag) : undefined,
-  ];
-  return tags.filter((tag) => tag !== undefined);
+function localInbound(inbound: JsonObject): JsonObject {
+  const { listen = "127.0.0.1", port, protocol, settings, tag } = inbound;
+  if (
+    !LOCAL_INBOUNDS.has(string(protocol) ?? "") ||
+    !LOOPBACK_LISTEN.has(string(listen) ?? "") ||
+    inbound.streamSettings != null
+  ) {
+    throw new Error("unsupported-inbound");
+  }
+  return {
+    listen,
+    ...(port !== undefined && { port }),
+    ...(protocol !== undefined && { protocol }),
+    ...(settings !== undefined && { settings }),
+    ...(tag !== undefined && { tag }),
+    sniffing: routingSniffing(object(inbound.sniffing) ?? {}),
+  };
 }
 
-function makeExit(bridge: JsonObject, main: string): JsonObject {
+function makeExit(bridge: JsonObject, main: string, tag: string): JsonObject {
   const stream = object(bridge.streamSettings);
   return {
     protocol: "vless",
     settings: bridge.settings ?? {},
     streamSettings: { ...stream, sockopt: { ...object(stream?.sockopt), dialerProxy: main } },
-    tag: EXIT_TAG,
+    tag,
+  };
+}
+
+function routingSniffing(sniffing: JsonObject): JsonObject {
+  for (const field of ["destOverride", "enabled", "routeOnly"]) {
+    assertExactKey(sniffing, field);
+  }
+  const existing = Array.isArray(sniffing.destOverride) ? sniffing.destOverride : [];
+  return {
+    ...sniffing,
+    destOverride: [...new Set([...existing, ...SNIFF_FOR_ROUTING])],
+    enabled: true,
+    routeOnly: sniffing.enabled === true ? (sniffing.routeOnly ?? false) : true,
   };
 }
 
@@ -189,9 +221,7 @@ function singleProxyBalancer(
   const selectors = balancer.selector.filter((value) => typeof value === "string");
   const matches = graph
     .keys()
-    .filter((candidate) =>
-      selectors.some((selector) => selector !== "" && candidate.startsWith(selector)),
-    )
+    .filter((candidate) => selectors.some((selector) => candidate.startsWith(selector)))
     .toArray();
   return matches.length === 1 && matches[0] === tag ? string(balancer.tag) : undefined;
 }
@@ -232,26 +262,4 @@ function validateRules(
     const { outboundTag: _outboundTag, ...rest } = rule;
     return { ...rest, balancerTag };
   });
-}
-
-function visit(tag: string, graph: ReadonlyMap<string, string[]>, path: ReadonlySet<string>): void {
-  const next = graph.get(tag);
-  if (next === undefined || path.has(tag)) {
-    throw new Error("broken-outbound-chain");
-  }
-  const branch = new Set([...path, tag]);
-  for (const target of next) {
-    visit(target, graph, branch);
-  }
-}
-
-function withMainTag(main: JsonObject, graph: ReadonlyMap<string, string[]>): JsonObject {
-  if (string(main.tag) !== undefined) {
-    return main;
-  }
-  let tag = "cascade-main";
-  while (graph.has(tag)) {
-    tag += "-main";
-  }
-  return { ...main, tag };
 }

@@ -17,7 +17,6 @@
           "show": false,
           "target": {{ (reality_target_host ~ ':' ~ configured_reality_target_port) | to_json }},
           "serverNames": [{{ reality_server_name | to_json }}],
-          "privateKey": {{ exit_material.private_key | to_json }},
           "shortIds": [{{ exit_material.short_id | to_json }}]
         }
       }

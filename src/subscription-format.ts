@@ -5,12 +5,16 @@ import { type JsonObject, type JsonValue, object, parseJson, string } from "./js
 import { linkTransport } from "./link-transport.ts";
 
 export type SourceFormat = "auto" | "base64" | "links" | "xray";
-type ParsedSubscription = { profiles: JsonObject[]; metadata: Headers; rejected: number };
+type ParsedSubscription = {
+  profiles: JsonObject[];
+  metadata: ReadonlySet<string>;
+  rejected: number;
+};
 
 const SIZE_LIMIT = 2 * 1024 * 1024;
 const MAX_NODES = 100;
 const BASE64 = /^[\w+/-]+={0,2}$/iu;
-const METADATA = /^#\s*(?<key>[a-z][\da-z-]*)(?::|\s)(?<value>[^\r\n]+)$/iu;
+const METADATA = /^#\s*(?<key>[a-z][\da-z-]*)(?::|\s)/iu;
 const UUID = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/iu;
 
 export function parseSubscription(body: string, format: SourceFormat): ParsedSubscription {
@@ -38,7 +42,7 @@ function decode64(value: string): string {
 }
 
 function decodeLinks(body: string): ParsedSubscription {
-  const metadata = new Headers();
+  const metadata = new Set<string>();
   const profiles: JsonObject[] = [];
   let rejected = 0;
   for (const value of body.split(/\r?\n/u)) {
@@ -48,8 +52,8 @@ function decodeLinks(body: string): ParsedSubscription {
     }
     if (line.startsWith("#")) {
       const fields = METADATA.exec(line)?.groups;
-      if (fields?.key !== undefined && fields.value !== undefined) {
-        metadata.append(fields.key, fields.value.trim());
+      if (fields?.key !== undefined) {
+        metadata.add(fields.key.toLowerCase());
       }
       continue;
     }
@@ -74,7 +78,7 @@ function decodeXray(body: string): ParsedSubscription {
   const profiles = values
     .map(object)
     .filter((node): node is JsonObject => node !== undefined && Array.isArray(node.outbounds));
-  return { metadata: new Headers(), profiles, rejected: values.length - profiles.length };
+  return { metadata: new Set(), profiles, rejected: values.length - profiles.length };
 }
 
 function hysteria(uri: string): JsonObject {
