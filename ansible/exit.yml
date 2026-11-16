@@ -1,5 +1,5 @@
 ---
-- name: Install the Happ cascade exit
+- name: Install the Claude Cascade exit
   hosts: exit_nodes
   become: true
   serial: 1

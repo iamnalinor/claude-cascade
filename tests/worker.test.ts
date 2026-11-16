@@ -35,6 +35,7 @@ test("merges JSON and base64 while retaining old routes and rejecting a placehol
   const response = await worker.fetch(request(), env());
   expect(response.status).toBe(200);
   expect(response.headers.get("X-Subscription-Rejected")).toBe("1");
+  expect(response.headers.get("profile-title")).toBe("Claude Cascade");
   expect(response.headers.get("profile-update-interval")).toBe("6");
   expect(response.headers.get("cache-control")).toBe("private, no-store");
   const profiles = objects(parseJson(await response.text()));

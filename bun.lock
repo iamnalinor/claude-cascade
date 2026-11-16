@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "happ-cascade",
+      "name": "claude-cascade",
       "dependencies": {
         "zod": "4.6.6"
       },

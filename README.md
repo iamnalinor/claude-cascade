@@ -1,4 +1,4 @@
-# Happ Cascade
+# Claude Cascade
 
 Одна подписка для Happ и Throne объединяет серверы из двух исходных подписок. Cloudflare Worker скачивает списки и собирает Xray JSON. VPN-трафик обрабатывает Xray на устройстве.
 
@@ -72,7 +72,7 @@ Throne отображает полные каскадные профили ка�
 
 ## Как получить и заменить конфиг EXIT2
 
-`EXIT_OUTBOUND` хранится в **Cloudflare → Workers & Pages → happ-cascade → Settings → Variables and Secrets**. Значение — один клиентский Xray outbound с `protocol: "vless"`, адресом и портом, UUID и параметрами TLS или REALITY. Для второго хопа используется транспорт RAW (`raw` или `tcp`) с проверкой сервера. Для первого хопа действуют транспортные настройки провайдера. Клиентский outbound — это один объект из массива `outbounds`. Ansible формирует серверный конфиг на VPS, приватный ключ REALITY остаётся на VPS.
+`EXIT_OUTBOUND` хранится в **Cloudflare → Workers & Pages → claude-cascade → Settings → Variables and Secrets**. Значение — один клиентский Xray outbound с `protocol: "vless"`, адресом и портом, UUID и параметрами TLS или REALITY. Для второго хопа используется транспорт RAW (`raw` или `tcp`) с проверкой сервера. Для первого хопа действуют транспортные настройки провайдера. Клиентский outbound — это один объект из массива `outbounds`. Ansible формирует серверный конфиг на VPS, приватный ключ REALITY остаётся на VPS.
 
 ### Вариант A. Развернуть свой VPS
 
@@ -115,7 +115,7 @@ bun run deploy --secrets-file .local/worker-secrets.json
 При первой настройке получить ссылку можно локально. Подставь адрес из **Settings → Domains & Routes**.
 
 ```sh
-WORKER_ORIGIN=https://happ-cascade.YOUR-SUBDOMAIN.workers.dev \
+WORKER_ORIGIN=https://claude-cascade.YOUR-SUBDOMAIN.workers.dev \
 bun --no-env-file -e '
 const { SUB_ACCESS_TOKEN } = await Bun.file(".local/worker-secrets.json").json();
 console.log(new URL("/sub/" + SUB_ACCESS_TOKEN, process.env.WORKER_ORIGIN).href);
@@ -128,14 +128,14 @@ GitHub Actions запускает `bun lint` на PR и push в `main`. Публ
 
 | Поле Cloudflare | Значение |
 | --- | --- |
-| Git repository | `iamnalinor/happ-cascade` |
+| Git repository | `iamnalinor/claude-cascade` |
 | Production branch | `main` |
 | Root directory | `/` |
 | Build command | `bun install --frozen-lockfile && bun lint` |
 | Deploy command | `bun run deploy` |
 | Preview builds | Выключены |
 
-Если репозиторий ещё не подключён, открой **Workers & Pages → happ-cascade → Settings → Builds → Connect** и выбери его в GitHub. Действующие runtime secrets уже находятся в настройках Worker и используются при автодеплое. Cloudflare берёт версию Bun из `packageManager` в `package.json`. Для Wrangler подходит Node.js из стандартного образа Workers Builds. [Cloudflare Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/) · [Версии инструментов в образе](https://developers.cloudflare.com/workers/ci-cd/builds/build-image/)
+Если репозиторий ещё не подключён, открой **Workers & Pages → claude-cascade → Settings → Builds → Connect** и выбери его в GitHub. Действующие runtime secrets находятся в настройках Worker и используются при автодеплое. Cloudflare берёт версию Bun из `packageManager` в `package.json`. Для Wrangler подходит Node.js из стандартного образа Workers Builds. [Cloudflare Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/) · [Версии инструментов в образе](https://developers.cloudflare.com/workers/ci-cd/builds/build-image/)
 
 ## Проверки и откат
 
@@ -144,7 +144,7 @@ bun lint
 bun test
 bun run build
 XRAY_BIN=xray python3 tests/check-cascade.py
-bun --no-env-file scripts/throne.ts --worker https://happ-cascade.YOUR-SUBDOMAIN.workers.dev
+bun --no-env-file scripts/throne.ts --worker https://claude-cascade.YOUR-SUBDOMAIN.workers.dev
 XRAY_BIN=xray bun run check:xray .local/worker-smoke.json
 ```
 

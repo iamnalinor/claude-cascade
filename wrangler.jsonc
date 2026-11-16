@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "happ-cascade",
+  "name": "claude-cascade",
   "main": "dist/worker.js",
   "compatibility_date": "2026-11-16",
   "workers_dev": true,

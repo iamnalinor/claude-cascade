@@ -135,7 +135,7 @@ function cascadeTags(
   ]
     .flatMap((value) => (Array.isArray(value) ? value : []))
     .filter((value) => typeof value === "string");
-  for (const prefix of ["cascade-", "happ-cascade-", "_cascade-"]) {
+  for (const prefix of ["cascade-", "claude-cascade-", "_cascade-"]) {
     const tags: [string, string, string] = [
       `${prefix}exit2`,
       `${prefix}ru-direct`,

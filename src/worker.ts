@@ -136,7 +136,7 @@ async function subscription(
     profiles,
     200,
     new Headers({
-      "profile-title": "Happ Cascade",
+      "profile-title": "Claude Cascade",
       "profile-update-interval": REFRESH_HOURS,
       "x-subscription-rejected": String(rejected),
       "x-subscription-sources-failed": String(configured.length - results.length),

@@ -23,7 +23,7 @@ if created:
             [
                 "openssl", "req", "-x509", "-newkey", "ec",
                 "-pkeyopt", "ec_paramgen_curve:prime256v1",
-                "-nodes", "-days", "1095", "-subj", "/CN=Happ Cascade EXIT2",
+                "-nodes", "-days", "1095", "-subj", "/CN=Claude Cascade EXIT2",
                 "-addext", f"subjectAltName=IP:{address}", "-addext", "extendedKeyUsage=serverAuth",
                 "-keyout", str(generated_key), "-out", str(generated_cert),
             ],
