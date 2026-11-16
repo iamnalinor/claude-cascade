@@ -40,7 +40,7 @@ test("accepts local client inbounds and keeps provider control services out of p
   const response = await worker.fetch(request(), env());
   expect(response.status).toBe(200);
   const result = objects(parseJson(await response.text()));
-  expect(result).toHaveLength(1);
+  expect(result).toHaveLength(2);
   expect(result[0]?.inbounds).toMatchObject([{ listen: "127.0.0.1", protocol: "socks" }]);
   expect(result[0]?.log).toBeUndefined();
 });
@@ -56,7 +56,7 @@ test("keeps UTF-8 metadata and rejects public cleartext profiles", async () => {
   });
   const response = await worker.fetch(request(), env());
   expect(response.status).toBe(200);
-  expect(objects(parseJson(await response.text()))).toHaveLength(1);
+  expect(objects(parseJson(await response.text()))).toHaveLength(2);
   expect(response.headers.get("x-subscription-rejected")).toBe("2");
 });
 

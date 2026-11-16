@@ -33,6 +33,10 @@ const PROFILE_FIELDS = new Set([
 ]);
 type CascadeOptions = { legacyXdns?: boolean; mainTag?: string };
 
+export function automaticInbounds(): JsonObject[] {
+  return defaultInbounds().map(localInbound);
+}
+
 export function cascade(
   profile: JsonObject,
   bridge: JsonObject,
@@ -80,12 +84,28 @@ export function cascade(
       rules: [
         { domain: TARGETS, outboundTag: exitTag, type: "field" },
         { domain: ["full:ip.net.coffee"], outboundTag: exitTag, type: "field" },
-        { domain: RU_DOMAINS, outboundTag: ruTag, type: "field" },
-        { ip: ["geoip:ru"], outboundTag: ruTag, type: "field" },
+        ...russianRules(ruTag),
         ...rules,
       ],
     },
   };
+}
+
+export function makeExit(bridge: JsonObject, main: string, tag: string): JsonObject {
+  const stream = object(bridge.streamSettings);
+  return {
+    protocol: "vless",
+    settings: bridge.settings ?? {},
+    streamSettings: { ...stream, sockopt: { ...object(stream?.sockopt), dialerProxy: main } },
+    tag,
+  };
+}
+
+export function russianRules(tag: string): JsonObject[] {
+  return [
+    { domain: RU_DOMAINS, outboundTag: tag, type: "field" },
+    { ip: ["geoip:ru"], outboundTag: tag, type: "field" },
+  ];
 }
 
 function cascadeTags(
@@ -145,16 +165,6 @@ function localInbound(inbound: JsonObject): JsonObject {
     ...(settings !== undefined && { settings }),
     ...(tag !== undefined && { tag }),
     sniffing: routingSniffing(object(inbound.sniffing) ?? {}),
-  };
-}
-
-function makeExit(bridge: JsonObject, main: string, tag: string): JsonObject {
-  const stream = object(bridge.streamSettings);
-  return {
-    protocol: "vless",
-    settings: bridge.settings ?? {},
-    streamSettings: { ...stream, sockopt: { ...object(stream?.sockopt), dialerProxy: main } },
-    tag,
   };
 }
 

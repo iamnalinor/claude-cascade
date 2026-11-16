@@ -1,3 +1,4 @@
+import { autoCascade } from "./auto-cascade.ts";
 import { type Compiled, compileSource, mergeSources } from "./compile-source.ts";
 import { validateBridge } from "./exit-bridge.ts";
 import { object, parseJson } from "./json-value.ts";
@@ -108,6 +109,10 @@ async function subscription(
       { error: incompatible > 0 ? "source-incompatible" : "subscription-unavailable" },
       502,
     );
+  }
+  const automatic = autoCascade(profiles, bridge);
+  if (automatic !== undefined) {
+    profiles.push(automatic);
   }
   const rejected = results.reduce((total, result) => total + result.rejected, 0);
   return json(

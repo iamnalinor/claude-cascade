@@ -38,8 +38,11 @@ test("merges JSON and base64 while retaining old routes and rejecting a placehol
   expect(response.headers.get("profile-update-interval")).toBe("6");
   expect(response.headers.get("cache-control")).toBe("private, no-store");
   const profiles = objects(parseJson(await response.text()));
-  expect(profiles).toHaveLength(2);
-  expect(profiles.map((profile) => profile.remarks)).toEqual(["Original", "Fixture"]);
+  expect(profiles.map((profile) => profile.remarks)).toEqual([
+    "Original",
+    "Fixture",
+    "Все → EXIT2",
+  ]);
   const original = profiles[0];
   const outbounds = objects(original?.outbounds);
   const rules = objects(object(original?.routing)?.rules);
@@ -242,7 +245,7 @@ test("keeps provider balancers and resolves mislabelled rules without dropping p
   const response = await worker.fetch(request(), config);
   expect(response.status).toBe(200);
   const profiles = objects(parseJson(await response.text()));
-  expect(profiles).toHaveLength(2);
+  expect(profiles).toHaveLength(3);
   expect(objects(object(profiles[0]?.routing)?.rules).at(-1)).toEqual({
     balancerTag: "balancer_actual",
     domain,
