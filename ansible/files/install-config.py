@@ -14,8 +14,10 @@ target = root / "config.json"
 config = json.load(sys.stdin)
 if isinstance(config, str):
     config = json.loads(config)
-with (root / "identity.json").open() as identity:
-    config["inbounds"][0]["streamSettings"]["realitySettings"]["privateKey"] = json.load(identity)["private_key"]
+stream = config["inbounds"][0]["streamSettings"]
+if stream["security"] == "reality":
+    with (root / "identity.json").open() as identity:
+        stream["realitySettings"]["privateKey"] = json.load(identity)["private_key"]
 
 group = grp.getgrnam("happ-exit").gr_gid
 if target.is_file() and not target.is_symlink():

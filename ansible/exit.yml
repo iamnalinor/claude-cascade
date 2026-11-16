@@ -16,6 +16,7 @@
         sha256: 1811c8f1da0c3b6dc707ebaf1c8390e987ba39859a8f0a7aadd8526157f2ec8d
     configured_exit_port: "{{ exit_port | default(443) }}"
     configured_exit_listen: "{{ exit_listen | default('::') }}"
+    configured_exit_security: "{{ exit_security | default('reality') }}"
     configured_reality_target_port: "{{ reality_target_port | default(443) }}"
     configured_exit_export_dir: "{{ exit_export_dir | default(playbook_dir ~ '/../.local') }}"
   tasks:
@@ -31,10 +32,33 @@
           - ansible_facts.service_mgr == "systemd"
           - exit_address is defined and exit_address | length > 0
           - configured_exit_port | int >= 1 and configured_exit_port | int <= 65535
+          - configured_exit_security in ["reality", "tls"]
+      tags: [preflight]
+
+    - name: Validate REALITY target
+      ansible.builtin.assert:
+        that:
           - configured_reality_target_port | int >= 1 and configured_reality_target_port | int <= 65535
           - reality_target_host is defined and reality_target_host is match('^[A-Za-z0-9][A-Za-z0-9.-]*$')
           - reality_server_name is defined and reality_server_name is match('^[A-Za-z0-9][A-Za-z0-9.-]*$')
           - reality_target_host != exit_address
+      when: configured_exit_security == 'reality'
+      tags: [preflight]
+
+    - name: Validate requirements for TLS with an IP certificate
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_facts.python.executable }}"
+          - -c
+          - |
+            import ipaddress, shutil, sys
+            ipaddress.IPv4Address(sys.argv[1])
+            if not shutil.which("openssl"):
+                raise SystemExit("openssl is required in TLS mode")
+          - "{{ exit_address }}"
+      changed_when: false
+      check_mode: false
+      when: configured_exit_security == 'tls'
       tags: [preflight]
 
     - name: Inspect the configured TCP port
@@ -89,6 +113,7 @@
           - "{{ exit_address }}"
       changed_when: false
       check_mode: false
+      when: configured_exit_security == 'reality'
       tags: [preflight]
 
     - name: Create the system group
@@ -242,7 +267,20 @@
             exit_material: "{{ exit_identity.stdout | from_json }}"
           no_log: true
 
-        - name: Insert the private key and validate the configuration on the exit
+        - name: Prepare the IP-bound TLS certificate on the exit
+          ansible.builtin.command:
+            argv:
+              - "{{ ansible_facts.python.executable }}"
+              - -c
+              - "{{ lookup('ansible.builtin.file', 'files/prepare-ip-tls.py') }}"
+              - /etc/happ-exit/tls
+              - "{{ exit_address }}"
+          register: exit_tls
+          changed_when: (exit_tls.stdout | from_json).changed
+          notify: Restart happ-exit
+          when: configured_exit_security == 'tls' and not ansible_check_mode
+
+        - name: Validate and install the configuration on the exit
           ansible.builtin.command:
             argv:
               - "{{ ansible_facts.python.executable }}"

@@ -81,6 +81,8 @@ ansible-playbook -i ansible/inventory.yml ansible/exit.yml
 
 `reality_target_host` — отдельный HTTPS-хост, доступный с VPS. Он должен обслуживать `reality_server_name` с TLS 1.3 и ALPN `h2`. Плейбук проверяет это перед установкой. Он скачивает зафиксированный релиз Xray, сверяет SHA-256, проверяет конфиг и запускает `happ-exit`. При необходимости на маленьком VPS добавь `exit_memory_max` и `exit_cpu_quota` в inventory. Эти параметры ограничивают только службу выхода.
 
+Если первый провайдер подменяет адрес назначения по SNI, укажи в inventory `exit_security: tls` и публичный IPv4 в `exit_address`. Плейбук создаст сертификат для этого IP и добавит его в клиентский конфиг как единственный доверенный сертификат. TLS с IP-адресом не отправляет SNI. При замене сертификата заново загрузи экспортированный outbound в Worker. [Настройки TLS в Xray](https://xtls.github.io/en/config/transports/tls.html#tlsobject)
+
 Для хоста с именем `exit2` плейбук сохранит готовый клиентский конфиг в **`.local/exit2-outbound.json`**. В нём есть данные для подключения, включая UUID. Файл игнорируется Git. [Пример inventory](ansible/inventory.example.yml) · [Параметры REALITY](https://xtls.github.io/en/config/transports/reality.html)
 
 ### Вариант B. Использовать готовый узел

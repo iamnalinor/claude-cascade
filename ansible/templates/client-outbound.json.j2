@@ -9,6 +9,15 @@
   },
   "streamSettings": {
     "network": "raw",
+{% if configured_exit_security == 'tls' %}
+    "security": "tls",
+    "tlsSettings": {
+      "certificates": [{ "certificate": {{ (exit_tls.stdout | from_json).certificate | to_json }}, "usage": "verify" }],
+      "disableSystemRoot": true,
+      "minVersion": "1.3",
+      "serverName": {{ exit_address | to_json }}
+    }
+{% else %}
     "security": "reality",
     "realitySettings": {
       "serverName": {{ reality_server_name | to_json }},
@@ -16,5 +25,6 @@
       "publicKey": {{ exit_material.public_key | to_json }},
       "shortId": {{ exit_material.short_id | to_json }}
     }
+{% endif %}
   }
 }
