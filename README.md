@@ -86,6 +86,8 @@ bun run deploy --secrets-file .local/worker-secrets.json
 
 Подставь путь к своему файлу из выбранного варианта. Подготовка сохраняет прежний токен, поэтому существующий URL для Happ продолжает работать после обновления подписки.
 
+Для замены только выхода через Dashboard открой **Variables and Secrets → EXIT_OUTBOUND → Edit**, вставь содержимое клиентского JSON и сохрани. Затем обнови подписку в Happ или Throne. Если у тебя ссылка `vless://`, используй скрипт выше для её преобразования.
+
 Для ручного деплоя в `.env` нужны `CLOUDFLARE_ACCOUNT_ID` и `CLOUDFLARE_API_TOKEN` с доступом на запись в Workers Scripts. Можно войти через `bunx --no-install wrangler login`. Для Wrangler нужен Node.js 22+ в `PATH`. Значения `UPSTREAM_A`, `UPSTREAM_B`, `EXIT_OUTBOUND` и `SUB_ACCESS_TOKEN` загружаются как секреты Cloudflare. [Права Workers](https://developers.cloudflare.com/workers/authorization/workers/)
 
 При первой настройке получить ссылку можно локально. Подставь адрес из **Settings → Domains & Routes**.
@@ -111,7 +113,7 @@ GitHub Actions запускает `bun lint` на PR и push в `main`. Публ
 | Deploy command | `bun run deploy` |
 | Preview builds | Выключены |
 
-Если репозиторий ещё не подключён, открой **Workers & Pages → happ-cascade → Settings → Builds → Connect** и выбери его в GitHub. Действующие runtime secrets уже находятся в настройках Worker и используются при автодеплое. [Cloudflare Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/)
+Если репозиторий ещё не подключён, открой **Workers & Pages → happ-cascade → Settings → Builds → Connect** и выбери его в GitHub. Действующие runtime secrets уже находятся в настройках Worker и используются при автодеплое. Cloudflare берёт версию Bun из `packageManager` в `package.json`. Для Wrangler подходит Node.js из стандартного образа Workers Builds. [Cloudflare Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/) · [Версии инструментов в образе](https://developers.cloudflare.com/workers/ci-cd/builds/build-image/)
 
 ## Проверки и откат
 
