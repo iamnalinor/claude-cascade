@@ -96,11 +96,7 @@ export function cascade(
     routing: {
       ...routing,
       domainStrategy: "IPOnDemand",
-      rules: [
-        ...cascadeRules({ outboundTag: exitTag }, ruTag, dns?.rule),
-        { network: "tcp,udp", outboundTag: exitTag, port: "3478,5349", type: "field" },
-        ...rules,
-      ],
+      rules: [...cascadeRules({ outboundTag: exitTag }, ruTag, dns?.rule), ...rules],
     },
   };
 }

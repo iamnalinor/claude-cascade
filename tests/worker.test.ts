@@ -91,7 +91,6 @@ test("merges JSON and base64 while retaining old routes and rejecting a placehol
       type: "field",
     },
     { ip: ["geoip:ru"], outboundTag: "cascade-ru-direct", type: "field" },
-    { network: "tcp,udp", outboundTag: "cascade-exit2", port: "3478,5349", type: "field" },
     old,
   ]);
   expect(objects(object(profiles.at(-1)?.routing)?.rules)[0]).toEqual({
