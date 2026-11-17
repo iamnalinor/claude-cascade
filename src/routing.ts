@@ -22,6 +22,8 @@ const TARGETS = [
   "domain:sift.com",
   "domain:siftscience.com",
 ];
+// Published inbound addresses, including the IPv6 range.
+const ANTHROPIC_IPS = ["160.79.104.0/23", "153.61.224.0/22", "2607:6bc0::/48"];
 const RU_DOMAINS = ["geosite:category-ru", "domain:ru", "domain:su", "domain:xn--p1ai"];
 const SNIFF_FOR_ROUTING = ["http", "tls", "quic"];
 const LOCAL_INBOUNDS = new Set(["dokodemo-door", "http", "mixed", "socks", "tunnel"]);
@@ -42,6 +44,7 @@ const PROFILE_FIELDS = new Set([
   "stats",
 ]);
 type CascadeOptions = { legacyXdns?: boolean; mainTag?: string };
+type RouteDestination = { balancerTag: string } | { outboundTag: string };
 
 export function automaticInbounds(): JsonObject[] {
   return defaultInbounds().map(localInbound);
@@ -62,7 +65,8 @@ export function cascade(
   for (const field of ["balancers", "domainStrategy", "rules", "script"]) {
     assertExactKey(routing, field);
   }
-  const [exitTag, ruTag, defaultMainTag] = cascadeTags(profile, routing, graph);
+  const inbounds = objects(profile.inbounds ?? defaultInbounds());
+  const [exitTag, ruTag, defaultMainTag, dnsTag] = cascadeTags(profile, routing, graph);
   const mainTag = string(main.tag) ?? defaultMainTag;
   const mainEndpoints = endpoints(main);
   const exitEndpoints = endpoints(bridge);
@@ -75,7 +79,6 @@ export function cascade(
   }
   const rules = validateRules(routing, graph, main);
   validateChains(graph, original);
-  const inbounds = objects(profile.inbounds ?? defaultInbounds());
   const outbounds = original.map((outbound) =>
     outbound === main ? { ...main, tag: mainTag } : outbound,
   );
@@ -83,16 +86,47 @@ export function cascade(
     protocol: "freedom",
     tag: ruTag,
   });
+  const dns = profile.dns == null ? encryptedDns(dnsTag, { outboundTag: mainTag }) : undefined;
   const { log: _log, ...profileSettings } = profile;
   return {
     ...profileSettings,
+    ...(dns !== undefined && { dns: dns.config }),
     inbounds: (inbounds.length === 0 ? defaultInbounds() : inbounds).map(localInbound),
     outbounds: outbounds.map((outbound) => adaptXdns(outbound, options.legacyXdns === true)),
     routing: {
       ...routing,
       domainStrategy: "IPOnDemand",
-      rules: [...targetRules({ outboundTag: exitTag }), ...russianRules(ruTag), ...rules],
+      rules: [
+        ...cascadeRules({ outboundTag: exitTag }, ruTag, dns?.rule),
+        { network: "tcp,udp", outboundTag: exitTag, port: "3478,5349", type: "field" },
+        ...rules,
+      ],
     },
+  };
+}
+
+export function cascadeRules(
+  destination: RouteDestination,
+  direct: string,
+  dnsRule?: JsonObject,
+): JsonObject[] {
+  return [
+    { ...destination, domain: TARGETS, type: "field" },
+    { ...destination, domain: ["full:ip.net.coffee"], type: "field" },
+    ...(dnsRule === undefined ? [] : [dnsRule]),
+    { domain: RU_DOMAINS, outboundTag: direct, type: "field" },
+    { ...destination, ip: ANTHROPIC_IPS, type: "field" },
+    { ip: ["geoip:ru"], outboundTag: direct, type: "field" },
+  ];
+}
+
+export function encryptedDns(
+  tag: string,
+  destination: RouteDestination,
+): { config: JsonObject; rule: JsonObject } {
+  return {
+    config: { servers: ["https://1.1.1.1/dns-query"], tag },
+    rule: { ...destination, inboundTag: [tag], type: "field" },
   };
 }
 
@@ -110,28 +144,12 @@ export function makeExit(bridge: JsonObject, main: string, tag: string): JsonObj
   };
 }
 
-export function russianRules(tag: string): JsonObject[] {
-  return [
-    { domain: RU_DOMAINS, outboundTag: tag, type: "field" },
-    { ip: ["geoip:ru"], outboundTag: tag, type: "field" },
-  ];
-}
-
-export function targetRules(
-  destination: { balancerTag: string } | { outboundTag: string },
-): JsonObject[] {
-  return [TARGETS, ["full:ip.net.coffee"]].map((domain) => ({
-    ...destination,
-    domain,
-    type: "field",
-  }));
-}
-
 function cascadeTags(
   profile: JsonObject,
   routing: JsonObject,
   graph: ReadonlyMap<string, string[]>,
-): [string, string, string] {
+): [string, string, string, string] {
+  const inbounds = objects(profile.inbounds ?? []);
   const monitors = [object(profile.observatory), object(profile.burstObservatory)];
   const selectors = [
     ...objects(routing.balancers ?? []).map((balancer) => fieldValue(balancer, "selector")),
@@ -140,15 +158,17 @@ function cascadeTags(
     .flatMap((value) => (Array.isArray(value) ? value : []))
     .filter((value) => typeof value === "string");
   for (const prefix of ["cascade-", "claude-cascade-", "_cascade-"]) {
-    const tags: [string, string, string] = [
+    const tags: [string, string, string, string] = [
       `${prefix}exit2`,
       `${prefix}ru-direct`,
       `${prefix}main`,
+      `${prefix}dns`,
     ];
     if (
       tags.every(
         (tag) => !graph.has(tag) && selectors.every((selector) => !tag.startsWith(selector)),
-      )
+      ) &&
+      inbounds.every((inbound) => inbound.tag !== tags[3])
     ) {
       return tags;
     }
@@ -188,14 +208,20 @@ function localInbound(inbound: JsonObject): JsonObject {
 }
 
 function routingSniffing(sniffing: JsonObject): JsonObject {
-  for (const field of ["destOverride", "enabled", "routeOnly"]) {
+  for (const field of ["destOverride", "enabled", "ipsExcluded", "routeOnly"]) {
     assertExactKey(sniffing, field);
   }
   const existing = Array.isArray(sniffing.destOverride) ? sniffing.destOverride : [];
+  const { ipsExcluded } = sniffing;
+  const excluded = Array.isArray(ipsExcluded)
+    ? ipsExcluded
+    : [string(ipsExcluded)].filter((entry) => entry !== undefined);
   return {
     ...sniffing,
     destOverride: [...new Set([...existing, ...SNIFF_FOR_ROUTING])],
     enabled: true,
+    // Keep the original destination IP when TLS or QUIC exposes a different outer name.
+    ipsExcluded: [...new Set([...excluded, ...ANTHROPIC_IPS])],
     routeOnly: sniffing.enabled === true ? (sniffing.routeOnly ?? false) : true,
   };
 }

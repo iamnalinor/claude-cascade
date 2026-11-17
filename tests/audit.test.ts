@@ -158,3 +158,33 @@ test("keeps generated routes outside the provider's balancer prefixes", async ()
     sockopt: { dialerProxy: "cascade-upstream" },
   });
 });
+
+test("retains provider DNS and sniffing exclusions while protecting incoming Anthropic addresses", async () => {
+  const dns = { hosts: { "internal.example": "192.0.2.53" }, servers: ["localhost"] };
+  const worker = createWorker({
+    fetcher: () =>
+      Promise.resolve(
+        Response.json({
+          dns,
+          inbounds: [
+            {
+              port: 10_808,
+              protocol: "socks",
+              sniffing: { enabled: true, ipsExcluded: ["192.0.2.0/24"], routeOnly: true },
+            },
+          ],
+          outbounds: [MAIN],
+        }),
+      ),
+  });
+  const result = await worker.fetch(request(), env());
+  const [profile] = objects(parseJson(await result.text()));
+  expect(profile?.dns).toEqual(dns);
+  expect(objects(profile?.inbounds)[0]?.sniffing).toMatchObject({
+    ipsExcluded: ["192.0.2.0/24", "160.79.104.0/23", "153.61.224.0/22", "2607:6bc0::/48"],
+    routeOnly: true,
+  });
+  expect(
+    objects(object(profile?.routing)?.rules).some((rule) => rule.inboundTag !== undefined),
+  ).toBe(false);
+});

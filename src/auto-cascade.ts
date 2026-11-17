@@ -1,7 +1,7 @@
 import { endpoints, isProxy } from "./endpoints.ts";
 import { canonical, type JsonObject, object, objects, string } from "./json-value.ts";
 import { linkTargets } from "./outbound-graph.ts";
-import { automaticInbounds, makeExit, russianRules, targetRules } from "./routing.ts";
+import { automaticInbounds, cascadeRules, encryptedDns, makeExit } from "./routing.ts";
 
 const EXIT_PREFIX = "auto-exit-";
 const BALANCER_TAG = "auto-cascade";
@@ -37,6 +37,8 @@ export function autoCascade(
     return undefined;
   }
   outbounds.push({ protocol: "freedom", tag: RU_TAG });
+  const destination = { balancerTag: BALANCER_TAG };
+  const dns = encryptedDns("auto-dns", destination);
   return {
     burstObservatory: {
       pingConfig: {
@@ -48,6 +50,7 @@ export function autoCascade(
       },
       subjectSelector: [EXIT_PREFIX],
     },
+    dns: dns.config,
     inbounds: automaticInbounds(),
     outbounds,
     remarks: "Все → EXIT2",
@@ -62,9 +65,8 @@ export function autoCascade(
       ],
       domainStrategy: "IPOnDemand",
       rules: [
-        ...targetRules({ balancerTag: BALANCER_TAG }),
-        ...russianRules(RU_TAG),
-        { balancerTag: BALANCER_TAG, network: "tcp,udp", type: "field" },
+        ...cascadeRules(destination, RU_TAG, dns.rule),
+        { ...destination, network: "tcp,udp", type: "field" },
       ],
     },
   };

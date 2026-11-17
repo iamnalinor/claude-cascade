@@ -44,12 +44,21 @@ test("merges JSON and base64 while retaining old routes and rejecting a placehol
     "Fixture",
     "Все → EXIT2",
   ]);
-  const original = profiles[0];
-  const outbounds = objects(original?.outbounds);
-  const rules = objects(object(original?.routing)?.rules);
+  const [original] = profiles;
+  if (original === undefined) {
+    throw new Error("missing original profile");
+  }
+  const outbounds = objects(original.outbounds);
+  const rules = objects(object(original.routing)?.rules);
   expect(outbounds[0]).toEqual(MAIN);
   expect(outbounds[1]?.streamSettings).toMatchObject({ sockopt: { dialerProxy: "provider-main" } });
-  expect(object(original?.routing)?.domainStrategy).toBe("IPOnDemand");
+  expect(object(original.routing)?.domainStrategy).toBe("IPOnDemand");
+  expect(original.dns).toEqual({ servers: ["https://1.1.1.1/dns-query"], tag: "cascade-dns" });
+  expect(object(objects(original.inbounds)[0]?.sniffing)?.ipsExcluded).toEqual([
+    "160.79.104.0/23",
+    "153.61.224.0/22",
+    "2607:6bc0::/48",
+  ]);
   expect(rules).toEqual([
     {
       domain: [
@@ -70,12 +79,19 @@ test("merges JSON and base64 while retaining old routes and rejecting a placehol
       type: "field",
     },
     { domain: ["full:ip.net.coffee"], outboundTag: "cascade-exit2", type: "field" },
+    { inboundTag: ["cascade-dns"], outboundTag: "provider-main", type: "field" },
     {
       domain: ["geosite:category-ru", "domain:ru", "domain:su", "domain:xn--p1ai"],
       outboundTag: "cascade-ru-direct",
       type: "field",
     },
+    {
+      ip: ["160.79.104.0/23", "153.61.224.0/22", "2607:6bc0::/48"],
+      outboundTag: "cascade-exit2",
+      type: "field",
+    },
     { ip: ["geoip:ru"], outboundTag: "cascade-ru-direct", type: "field" },
+    { network: "tcp,udp", outboundTag: "cascade-exit2", port: "3478,5349", type: "field" },
     old,
   ]);
   expect(objects(object(profiles.at(-1)?.routing)?.rules)[0]).toEqual({

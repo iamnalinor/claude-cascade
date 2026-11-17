@@ -58,6 +58,20 @@ test("appends one automatic profile that measures complete cascades and blocks f
   expect(balancer.strategy).toEqual({ type: "leastPing" });
   expect(outbounds[0]).toEqual({ protocol: "blackhole", tag: string(balancer.fallbackTag) ?? "" });
   const rules = objects(routing?.rules);
+  expect(automatic.dns).toEqual({
+    servers: ["https://1.1.1.1/dns-query"],
+    tag: "auto-dns",
+  });
+  expect(rules).toContainEqual({
+    balancerTag: "auto-cascade",
+    inboundTag: ["auto-dns"],
+    type: "field",
+  });
+  expect(rules).toContainEqual({
+    balancerTag: "auto-cascade",
+    ip: ["160.79.104.0/23", "153.61.224.0/22", "2607:6bc0::/48"],
+    type: "field",
+  });
   expect(rules).toContainEqual({
     ip: ["geoip:ru"],
     outboundTag: "cascade-ru-direct",

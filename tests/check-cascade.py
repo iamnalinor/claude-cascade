@@ -100,6 +100,7 @@ def client_config(ports, ca):
     const user = {encryption:'none', id:'66503fc8-b327-4ae1-a6a5-dd6964910bb4'};
     const settings = (address, port) => ({vnext:[{address, port, users:[user]}]});
     const profile = {
+      dns:{hosts:{'ordinary.example':'127.0.0.1','other.ip.net.coffee':'127.0.0.1'}},
       inbounds:[{listen:'127.0.0.1',port:socks,protocol:'socks'}],
       outbounds:[{protocol:'vless',settings:settings('10.0.0.10',first),tag:'main'}],
     };
