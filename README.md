@@ -109,6 +109,18 @@ ansible-playbook -i ansible/inventory.yml ansible/exit.yml
 - Если у тебя уже есть клиентский outbound, положи его в `.local/exit2-outbound.json`.
 - Если есть ссылка `vless://…` или URL HTTP, HTTPS либо SOCKS5, положи его одной строкой в `.local/exit2-link.txt`. Передай этот файл в `prepare-secrets.ts`. Формат URL с авторизацией — `http://user:password@proxy.example.com:8080`. Hysteria2 передаётся как Xray JSON.
 
+### Если прокси EXIT2 принимает соединения только с одного IP
+
+Укажи прокси в `EXIT_OUTBOUND` и выбери в Happ или Throne VPN-узел, который открывает соединения с разрешённого публичного IP. Проверь этот IP в исходном профиле VPN без каскада. Затем выбери тот же узел в подписке Cascade и открой `ip.net.coffee`. Теперь сайт должен показать выходной адрес прокси EXIT2.
+
+Если VPN с разрешённым IP недоступен из твоей сети, можно собрать полный Xray-профиль с двумя VPN-выходами и отдать его Worker через приватную HTTPS-подписку. Задай выходу с разрешённым IP тег `allowed-egress`, а в его `streamSettings.sockopt.dialerProxy` укажи тег доступного входного VPN, например `entry`. Укажи `mainTag: "allowed-egress"` в записи этого источника в `SOURCES`. Worker добавит к выбранному выходу прокси из `EXIT_OUTBOUND`.
+
+```text
+устройство → входной VPN → VPN с разрешённым IP → EXIT2 → сайт
+```
+
+Можно скопировать текущий клиентский конфиг VPN в этот профиль и обновить копию вручную, если изменятся адрес, ключи или транспорт. У каждого выхода должен быть свой тег. Если входной VPN уже даёт нужный IP, достаточно одного VPN-хопа. [Цепочки Xray](https://xtls.github.io/en/config/transports/sockopt.html#dialerproxy)
+
 ### Загрузить в Worker
 
 ```sh
