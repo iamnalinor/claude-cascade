@@ -35,7 +35,7 @@ test("merges JSON and base64 while retaining old routes and rejecting a placehol
   const response = await worker.fetch(request(), env());
   expect(response.status).toBe(200);
   expect(response.headers.get("X-Subscription-Rejected")).toBe("1");
-  expect(response.headers.get("profile-title")).toBe("Claude Cascade");
+  expect(response.headers.get("profile-title")).toBe("Claude Cascade [warnings: 1]");
   expect(response.headers.get("profile-update-interval")).toBe("6");
   expect(response.headers.get("cache-control")).toBe("private, no-store");
   const profiles = objects(parseJson(await response.text()));
@@ -130,7 +130,9 @@ test("keeps an available source and blocks cross-origin redirects and provider-b
   });
   const incompatible = await noOutput.fetch(request(), env());
   expect(incompatible.status).toBe(502);
-  expect(await incompatible.text()).toBe('{"error":"source-incompatible"}');
+  const failure = object(parseJson(await incompatible.text()));
+  expect(failure?.error).toBe("source-incompatible");
+  expect(failure?.diagnostics).toBeArray();
 });
 
 test("isolates opt-in cache between identities and returns no profile on missing HWID", async () => {

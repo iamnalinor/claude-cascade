@@ -1,6 +1,7 @@
 import { endpoints, validateTransportSecurity } from "./endpoints.ts";
-import { type JsonObject, object, string } from "./json-value.ts";
-import { assertExactKey, linkTargets } from "./outbound-graph.ts";
+import { type JsonObject, object, parseJson, string } from "./json-value.ts";
+import { assertExactKey, indexOutbounds, linkTargets } from "./outbound-graph.ts";
+import { type Bindings, textBinding } from "./source-config.ts";
 
 const BRIDGE_STREAM_FIELDS = new Set([
   "method",
@@ -27,6 +28,30 @@ const REALITY_CLIENT_FIELDS = new Set([
   "show",
   "spiderX",
 ]);
+
+export type ExitConfiguration = { bridge: JsonObject; via?: JsonObject };
+
+export function exitConfiguration(environment: Bindings): ExitConfiguration {
+  const bridge = object(parseJson(textBinding(environment, "EXIT_OUTBOUND")));
+  if (bridge === undefined) {
+    throw new Error("missing-bridge");
+  }
+  validateBridge(bridge);
+  if (environment.EXIT_VIA_OUTBOUND === undefined) {
+    return { bridge };
+  }
+  const via = object(parseJson(textBinding(environment, "EXIT_VIA_OUTBOUND")));
+  if (via === undefined || linkTargets(via).length > 0) {
+    throw new Error("invalid-exit-via");
+  }
+  indexOutbounds([via]);
+  endpoints(via);
+  validateTransportSecurity(via);
+  if (object(object(via.streamSettings)?.tlsSettings)?.allowInsecure === true) {
+    throw new Error("invalid-exit-via");
+  }
+  return { bridge, via };
+}
 
 export function validateBridge(bridge: JsonObject): void {
   const stream = object(bridge.streamSettings) ?? {};

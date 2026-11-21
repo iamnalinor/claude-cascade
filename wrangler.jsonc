@@ -5,11 +5,8 @@
   "compatibility_date": "2026-11-16",
   "workers_dev": true,
   "preview_urls": false,
-  "observability": { "enabled": false },
-  "vars": {
-    "SOURCES": [
-      { "id": "throne-a", "urlSecret": "UPSTREAM_A", "requiresHwid": true },
-      { "id": "throne-b", "urlSecret": "UPSTREAM_B", "requiresHwid": true }
-    ]
-  }
+  "observability": {
+    "enabled": false
+  },
+  "keep_vars": true
 }

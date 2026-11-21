@@ -8,6 +8,7 @@ const IDENTITY_HEADERS = [
   "x-device-os",
   "x-ver-os",
   "x-device-model",
+  "x-device-name",
 ] as const;
 const optionalIdentity = [...IDENTITY_HEADERS, "installid", "x-install-id", "providerid"] as const;
 const SOURCE_CONFIG = z.strictObject({

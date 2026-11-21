@@ -1,6 +1,6 @@
 import { type Bindings, type Source, textBinding } from "./source-config.ts";
+import { MAX_SUBSCRIPTION_BYTES } from "./subscription-limits.ts";
 
-const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_REDIRECTS = 2;
 const REDIRECT = new Set([301, 302, 303, 307, 308]);
 
@@ -40,7 +40,7 @@ export async function fetchSource(request: Request, fetcher: Fetcher): Promise<R
 
 export async function readSource(response: Response): Promise<string> {
   if (
-    Number(response.headers.get("content-length")) > MAX_BYTES ||
+    Number(response.headers.get("content-length")) > MAX_SUBSCRIPTION_BYTES ||
     response.headers.get("content-type")?.toLowerCase().includes("text/html") === true
   ) {
     await response.body?.cancel();
@@ -60,7 +60,7 @@ export async function readSource(response: Response): Promise<string> {
         return content + decoder.decode();
       }
       bytes += chunk.value.byteLength;
-      if (bytes > MAX_BYTES) {
+      if (bytes > MAX_SUBSCRIPTION_BYTES) {
         throw new Error("source-limit");
       }
       content += decoder.decode(chunk.value, { stream: true });
@@ -95,6 +95,10 @@ export function sourceRequest(environment: Bindings, source: Source, request: Re
 }
 
 async function checkStatus(response: Response): Promise<Response> {
+  if (response.headers.get("x-hwid-not-supported")?.toLowerCase() === "true") {
+    await response.body?.cancel();
+    throw new IncompatibleSource("provider-rejected-hwid");
+  }
   if (response.ok) {
     return response;
   }

@@ -1,15 +1,14 @@
-import { autoCascade } from "./auto-cascade.ts";
-import { type Compiled, compileSource, mergeSources } from "./compile-source.ts";
-import { validateBridge } from "./exit-bridge.ts";
-import { type JsonObject, object, objects, parseJson } from "./json-value.ts";
+import { collectSources } from "./collect-sources.ts";
+import { exitConfiguration } from "./exit-bridge.ts";
+import { renderSubscription } from "./render-subscription.ts";
 import { type SourceCache, type TaskContext } from "./source-cache.ts";
 import { type Bindings, sources, textBinding } from "./source-config.ts";
-import { type Fetcher, IncompatibleSource } from "./source-request.ts";
+import { type Fetcher } from "./source-request.ts";
+import { diagnosticLines, subscriptionAnnouncement } from "./subscription-announcement.ts";
 
-const MAX_PARALLEL = 3;
 const NO_STORE = "private, no-store";
 const TOKEN_PATTERN = /^[\w-]{32,128}$/iu;
-const URL_PATTERN = /^\/sub\/(?<token>[\w-]{32,128})$/iu;
+const URL_PATTERN = /^\/sub\/(?<token>[\w-]{32,128})(?:\/report)?$/iu;
 const REFRESH_HOURS = "6";
 
 type RuntimeDependencies = { cache?: SourceCache; fetcher?: Fetcher };
@@ -23,7 +22,8 @@ export function createWorker(dependencies: RuntimeDependencies = {}): {
       if (request.method === "GET" && url.pathname === "/health") {
         return json({ status: "ok" }, 200);
       }
-      const provided = URL_PATTERN.exec(url.pathname)?.groups?.token;
+      const match = URL_PATTERN.exec(url.pathname);
+      const provided = match?.groups?.token;
       if (request.method !== "GET" || url.search !== "" || provided === undefined) {
         return json({ error: "not-found" }, 404);
       }
@@ -66,81 +66,47 @@ function json(value: unknown, status: number, headers?: Headers): Response {
   return Response.json(value, { headers: responseHeaders, status });
 }
 
-function renderProfiles(
-  compiled: JsonObject[],
-  bridge: JsonObject,
-  request: Request,
-): { profiles: JsonObject[]; rejected: number } {
-  const canUseLegacyProxy = /^Throne\/1\.2\.4(?:$|[\s(/-])/iu.test(
-    request.headers.get("user-agent") ?? "",
-  );
-  const profiles = canUseLegacyProxy
-    ? compiled
-    : compiled.filter((profile) =>
-        objects(profile.outbounds).every((outbound) => outbound.proxySettings === undefined),
-      );
-  const automatic = autoCascade(compiled, bridge, canUseLegacyProxy);
-  return {
-    profiles: automatic === undefined ? profiles : [...profiles, automatic],
-    rejected: compiled.length - profiles.length,
-  };
-}
-
 async function subscription(
   request: Request,
   environment: Bindings,
   options: RuntimeDependencies & { context?: TaskContext; token: string },
 ): Promise<Response> {
-  const bridge = object(parseJson(textBinding(environment, "EXIT_OUTBOUND")));
-  if (bridge === undefined) {
-    throw new Error("missing-bridge");
-  }
-  validateBridge(bridge);
+  const exit = exitConfiguration(environment);
   const configured = sources(environment);
-  const { fetcher = fetch } = options;
-  const results: Compiled[] = [];
-  let incompatible = 0;
-  for (let index = 0; index < configured.length; index += MAX_PARALLEL) {
-    const batch = configured.slice(index, index + MAX_PARALLEL);
-    const completed = await Promise.allSettled(
-      batch.map(
-        async (source) =>
-          await compileSource(
-            source,
-            { bridge, env: environment, request, token: options.token },
-            {
-              ...options,
-              fetcher,
-            },
-          ),
-      ),
-    );
-    for (const result of completed) {
-      if (result.status === "fulfilled") {
-        results.push(result.value);
-      } else if (result.reason instanceof IncompatibleSource) {
-        incompatible++;
-      }
-    }
-  }
-  const output = renderProfiles(mergeSources(results), bridge, request);
-  const { profiles } = output;
+  const results = await collectSources(
+    configured,
+    {
+      ...exit,
+      env: environment,
+      request,
+      token: options.token,
+    },
+    { ...options, fetcher: options.fetcher ?? fetch },
+  );
+  const { profiles, report } = renderSubscription(results, request, exit);
+  const diagnostics = diagnosticLines(report);
   if (profiles.length === 0) {
     return json(
-      { error: incompatible > 0 ? "source-incompatible" : "subscription-unavailable" },
+      {
+        error: results.incompatible > 0 ? "source-incompatible" : "subscription-unavailable",
+        diagnostics,
+      },
       502,
     );
   }
-  const rejected = results.reduce((total, result) => total + result.rejected, output.rejected);
+  const { rejected, failedSources } = report.summary;
+  const warnings = rejected + failedSources;
+  const announce = subscriptionAnnouncement(diagnostics, profiles);
   return json(
     profiles,
     200,
     new Headers({
-      "profile-title": "Claude Cascade",
+      "profile-title": warnings > 0 ? `Claude Cascade [warnings: ${warnings}]` : "Claude Cascade",
       "profile-update-interval": REFRESH_HOURS,
       "x-subscription-rejected": String(rejected),
-      "x-subscription-sources-failed": String(configured.length - results.length),
-      "x-subscription-sources-incompatible": String(incompatible),
+      "x-subscription-sources-failed": String(failedSources),
+      "x-subscription-sources-incompatible": String(results.incompatible),
+      ...(announce !== undefined && { announce }),
     }),
   );
 }

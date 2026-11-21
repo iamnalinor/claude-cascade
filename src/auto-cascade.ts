@@ -1,23 +1,28 @@
 import { endpoints, isProxy } from "./endpoints.ts";
+import { exitOutbounds } from "./exit-chain.ts";
 import { canonical, type JsonObject, object, objects, string } from "./json-value.ts";
 import { linkTargets } from "./outbound-graph.ts";
-import { automaticInbounds, cascadeRules, encryptedDns, makeExit } from "./routing.ts";
+import { automaticInbounds, cascadeRules, encryptedDns } from "./routing.ts";
 
 const EXIT_PREFIX = "auto-exit-";
 const BALANCER_TAG = "auto-cascade";
 const BLOCK_TAG = "auto-block";
 const RU_TAG = "cascade-ru-direct";
 
+type PoolOptions = { canUseLegacyProxy?: boolean; via?: JsonObject };
+
 export function autoCascade(
   profiles: JsonObject[],
   bridge: JsonObject,
-  canUseLegacyProxy = false,
+  options: PoolOptions = {},
 ): JsonObject | undefined {
+  const { via } = options;
   const outbounds: JsonObject[] = [{ protocol: "blackhole", tag: BLOCK_TAG }];
   const seen = new Set<string>();
   const exitEndpoints = new Set(endpoints(bridge).map((endpoint) => JSON.stringify(endpoint)));
   for (const profile of profiles) {
-    for (const chain of firstHops(profile, exitEndpoints, canUseLegacyProxy)) {
+    const chains = firstHops(profile, exitEndpoints, options);
+    for (const chain of chains) {
       const key = canonical(chain);
       if (seen.has(key)) {
         continue;
@@ -29,13 +34,17 @@ export function autoCascade(
       );
       outbounds.push(
         ...chain.map((outbound, offset) => remap(outbound, tags, `auto-hop-${index}-${offset}`)),
-        makeExit(bridge, `auto-hop-${index}-0`, `${EXIT_PREFIX}${index}`),
+        ...exitOutbounds(bridge, `auto-hop-${index}-0`, {
+          tag: `${EXIT_PREFIX}${index}`,
+          ...(via !== undefined && { via }),
+        }),
       );
     }
   }
-  if (seen.size === 0) {
-    return undefined;
-  }
+  return seen.size === 0 ? undefined : automaticProfile(outbounds);
+}
+
+function automaticProfile(outbounds: JsonObject[]): JsonObject {
   outbounds.push({ protocol: "freedom", tag: RU_TAG });
   const destination = { balancerTag: BALANCER_TAG };
   const dns = encryptedDns("auto-dns", destination);
@@ -105,10 +114,10 @@ function collect(
 function firstHops(
   profile: JsonObject,
   exitEndpoints: ReadonlySet<string>,
-  canUseLegacyProxy: boolean,
+  options: PoolOptions,
 ): JsonObject[][] {
-  // The final two outbounds of each compiled profile are the injected EXIT2 and Russian direct.
-  const original = objects(profile.outbounds).slice(0, -2);
+  // Strip the configured fixed exit outbounds and Russian direct before pooling provider nodes.
+  const original = objects(profile.outbounds).slice(0, options.via === undefined ? -2 : -3);
   const byTag = new Map(original.map((outbound) => [string(outbound.tag), outbound]));
   const chains: JsonObject[][] = [];
   for (const outbound of original) {
@@ -117,7 +126,10 @@ function firstHops(
     }
     try {
       const chain = collect(outbound, byTag);
-      if (!canUseLegacyProxy && chain.some((leg) => leg.proxySettings !== undefined)) {
+      if (
+        options.canUseLegacyProxy !== true &&
+        chain.some((leg) => leg.proxySettings !== undefined)
+      ) {
         continue;
       }
       const proxyEndpoints = chain.filter(isProxy).flatMap(endpoints);

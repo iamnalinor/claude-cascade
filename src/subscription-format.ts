@@ -3,15 +3,17 @@ import { z } from "zod";
 import { linkMask } from "./final-mask.ts";
 import { type JsonObject, type JsonValue, object, parseJson, string } from "./json-value.ts";
 import { linkTransport } from "./link-transport.ts";
+import { linkTitle, nodeIssue, type NodeIssue } from "./subscription-diagnostics.ts";
+import { MAX_SUBSCRIPTION_BYTES } from "./subscription-limits.ts";
 
 export type SourceFormat = "auto" | "base64" | "links" | "xray";
 type ParsedSubscription = {
   profiles: JsonObject[];
   metadata: ReadonlySet<string>;
   rejected: number;
+  issues: NodeIssue[];
 };
 
-const SIZE_LIMIT = 2 * 1024 * 1024;
 const MAX_NODES = 100;
 const BASE64 = /^[\w+/-]+={0,2}$/iu;
 const METADATA = /^#\s*(?<key>[a-z][\da-z-]*)(?::|\s)/iu;
@@ -19,7 +21,7 @@ const UUID = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/iu;
 
 export function parseSubscription(body: string, format: SourceFormat): ParsedSubscription {
   const value = body.trim();
-  if (value.length > SIZE_LIMIT || value === "") {
+  if (value.length > MAX_SUBSCRIPTION_BYTES || value === "") {
     throw new Error("invalid-subscription-size");
   }
   if (format === "xray" || (format === "auto" && /^[{[]/u.test(value))) {
@@ -44,7 +46,7 @@ function decode64(value: string): string {
 function decodeLinks(body: string): ParsedSubscription {
   const metadata = new Set<string>();
   const profiles: JsonObject[] = [];
-  let rejected = 0;
+  const issues: NodeIssue[] = [];
   for (const value of body.split(/\r?\n/u)) {
     const line = value.trim();
     if (line === "") {
@@ -57,16 +59,16 @@ function decodeLinks(body: string): ParsedSubscription {
       }
       continue;
     }
-    if (profiles.length + rejected >= MAX_NODES) {
+    if (profiles.length + issues.length >= MAX_NODES) {
       throw new Error("too-many-nodes");
     }
     try {
       profiles.push(parseLink(line));
-    } catch {
-      rejected++;
+    } catch (error) {
+      issues.push(nodeIssue("parse", linkTitle(line), error));
     }
   }
-  return { metadata, profiles, rejected };
+  return { metadata, profiles, rejected: issues.length, issues };
 }
 
 function decodeXray(body: string): ParsedSubscription {
@@ -75,10 +77,17 @@ function decodeXray(body: string): ParsedSubscription {
   if (values.length > MAX_NODES) {
     throw new Error("too-many-nodes");
   }
-  const profiles = values
-    .map(object)
-    .filter((node): node is JsonObject => node !== undefined && Array.isArray(node.outbounds));
-  return { metadata: new Set(), profiles, rejected: values.length - profiles.length };
+  const profiles: JsonObject[] = [];
+  const issues: NodeIssue[] = [];
+  for (const value of values) {
+    const node = object(value);
+    if (node !== undefined && Array.isArray(node.outbounds)) {
+      profiles.push(node);
+    } else {
+      issues.push(nodeIssue("parse", node?.remarks, new Error("missing-xray-outbounds")));
+    }
+  }
+  return { metadata: new Set(), profiles, rejected: issues.length, issues };
 }
 
 function hysteria(uri: string): JsonObject {
@@ -86,8 +95,16 @@ function hysteria(uri: string): JsonObject {
   const user = decodeURIComponent(url.username);
   const password = decodeURIComponent(url.password);
   const name = url.searchParams.get("sni");
-  if (user === "" || url.port === "" || url.searchParams.size > (name === null ? 0 : 1)) {
+  if (
+    user === "" ||
+    url.port === "" ||
+    url.searchParams.keys().some((key) => !["fm", "sni"].includes(key))
+  ) {
     throw new Error("unsupported-hysteria-link");
+  }
+  const mask = linkMask(url.searchParams.get("fm"), "hysteria");
+  if (mask.dialer !== undefined) {
+    throw new Error("unsupported-hysteria-dialer-mask");
   }
   return profile(
     {
@@ -98,6 +115,7 @@ function hysteria(uri: string): JsonObject {
         network: "hysteria",
         security: "tls",
         tlsSettings: name === null ? {} : { serverName: name },
+        ...(mask.finalmask !== undefined && { finalmask: mask.finalmask }),
       },
     },
     decodeURIComponent(url.hash.slice(1)) || "Hysteria2",

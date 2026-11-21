@@ -9,6 +9,7 @@ export type TaskContext = { waitUntil(promise: Promise<unknown>): void };
 
 type KeyInputs = {
   bridge: JsonObject;
+  via?: JsonObject;
   config: Source;
   incoming: Request;
   key: string;
@@ -27,12 +28,13 @@ export async function cacheKey(inputs: KeyInputs): Promise<Request | undefined> 
     ["sign"],
   );
   const payload: JsonValue = [
-    "subscription-v7",
+    "subscription-v12",
     inputs.incoming.headers.get("user-agent"),
     JSON.stringify(inputs.config),
     inputs.upstream.url,
     [...inputs.upstream.headers],
     inputs.bridge,
+    inputs.via ?? null,
   ];
   const hash = await crypto.subtle.sign("HMAC", key, encoder.encode(canonical(payload)));
   const url = new URL(`/.internal/sub-cache/${new Uint8Array(hash).toHex()}`, inputs.incoming.url);

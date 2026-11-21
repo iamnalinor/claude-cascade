@@ -9,25 +9,46 @@ import {
   readSource,
   sourceRequest,
 } from "./source-request.ts";
+import {
+  cachedIssues,
+  isInformationalPlaceholder,
+  isRejectedIssue,
+  nodeIssue,
+  type NodeIssue,
+  SourceCompilationError,
+} from "./subscription-diagnostics.ts";
 import { parseSubscription } from "./subscription-format.ts";
+import { MAX_SUBSCRIPTION_BYTES } from "./subscription-limits.ts";
 
 const PROVIDER_BINDINGS = new Set(["install-id", "installid", "provider-id", "providerid"]);
-const RESPONSE_CONTROLS = [...PROVIDER_BINDINGS, "subscription-always-hwid-enable", "routing"];
-const MAX_COMPILED_BYTES = 2 * 1024 * 1024;
+// Provider routing headers are ignored; only the generated profile routing is returned.
+const RESPONSE_CONTROLS = [...PROVIDER_BINDINGS, "subscription-always-hwid-enable"];
 const encoder = new TextEncoder();
 
-export type Compiled = { profiles: JsonObject[]; rejected: number };
-type Dependencies = {
+export type CompilationContext = {
+  bridge: JsonObject;
+  via?: JsonObject;
+  env: Bindings;
+  request: Request;
+  token: string;
+};
+export type Compiled = {
+  source: string;
+  profiles: JsonObject[];
+  rejected: number;
+  input: number;
+  issues: NodeIssue[];
+};
+export type CompileDependencies = {
   cache?: SourceCache;
   context?: TaskContext;
   fetcher: Fetcher;
 };
-type RequestContext = { bridge: JsonObject; env: Bindings; request: Request; token: string };
 
 export async function compileSource(
   source: Source,
-  context: RequestContext,
-  dependencies: Dependencies,
+  context: CompilationContext,
+  dependencies: CompileDependencies,
 ): Promise<Compiled> {
   const upstream = sourceRequest(context.env, source, context.request);
   const storage = dependencies.cache;
@@ -36,13 +57,14 @@ export async function compileSource(
       ? undefined
       : await cacheKey({
           bridge: context.bridge,
+          ...(context.via !== undefined && { via: context.via }),
           config: source,
           incoming: context.request,
           key: context.token,
           upstream,
         });
   if (storage !== undefined && key !== undefined) {
-    const result = await cached(storage, key);
+    const result = await cached(storage, key, source.id);
     if (result !== undefined) {
       return result;
     }
@@ -62,7 +84,10 @@ export async function compileSource(
   return result;
 }
 
-export function mergeSources(items: Compiled[]): JsonObject[] {
+export function mergeSources(
+  items: Compiled[],
+  onDuplicate?: (item: Compiled, profile: JsonObject) => void,
+): JsonObject[] {
   const seen = new Set<string>();
   const profiles: JsonObject[] = [];
   for (const item of items) {
@@ -71,6 +96,7 @@ export function mergeSources(items: Compiled[]): JsonObject[] {
       // Leave records with client-facing settings distinct when those settings differ.
       const key = canonical({ ...runtime, metadata: meta });
       if (seen.has(key)) {
+        onDuplicate?.(item, profile);
         continue;
       }
 
@@ -81,7 +107,11 @@ export function mergeSources(items: Compiled[]): JsonObject[] {
   return profiles;
 }
 
-async function cached(storage: SourceCache, key: Request): Promise<Compiled | undefined> {
+async function cached(
+  storage: SourceCache,
+  key: Request,
+  source: string,
+): Promise<Compiled | undefined> {
   try {
     const result = await storage.match(key);
     if (result === undefined) {
@@ -96,23 +126,36 @@ async function cached(storage: SourceCache, key: Request): Promise<Compiled | un
       return undefined;
     }
     const profiles = envelope.profiles.map(object).filter((item) => item !== undefined);
-    return profiles.length === 0 ? undefined : { profiles, rejected: envelope.rejected };
+    return profiles.length === 0
+      ? undefined
+      : {
+          source,
+          profiles,
+          rejected: envelope.rejected,
+          input:
+            typeof envelope.input === "number"
+              ? envelope.input
+              : profiles.length + envelope.rejected,
+          issues: cachedIssues(envelope.issues),
+        };
   } catch {
     return undefined;
   }
 }
 
-function fromBody(body: string, source: Source, context: RequestContext): Compiled {
+function fromBody(body: string, source: Source, context: CompilationContext): Compiled {
   const userAgent = context.request.headers.get("user-agent") ?? "";
   const options = {
+    ...(context.via !== undefined && { via: context.via }),
     legacyXdns: /^(?:Happ\/4\.8\.0|Throne\/1\.2\.4)(?:$|[\s(/-])/iu.test(userAgent),
     ...(source.mainTag !== undefined && { mainTag: source.mainTag }),
   };
   const parsed = parseSubscription(body, source.format);
   supportedHeaders(parsed.metadata);
   const profiles: JsonObject[] = [];
-  let rejected = parsed.rejected;
-  let remaining = MAX_COMPILED_BYTES;
+  const issues = [...parsed.issues];
+  const input = parsed.profiles.length + parsed.rejected;
+  let remaining = MAX_SUBSCRIPTION_BYTES;
   for (const profile of parsed.profiles) {
     verifyProfileIdentity(profile);
     try {
@@ -123,14 +166,24 @@ function fromBody(body: string, source: Source, context: RequestContext): Compil
       }
       profiles.push(result);
       remaining -= bytes;
-    } catch {
-      rejected++;
+    } catch (error) {
+      issues.push(
+        isInformationalPlaceholder(profile.remarks, error)
+          ? nodeIssue("informational", profile.remarks, new Error("provider-information"))
+          : nodeIssue("compile", profile.remarks, error),
+      );
     }
   }
   if (profiles.length === 0) {
-    throw new Error("no-usable-nodes");
+    throw new SourceCompilationError(issues, input);
   }
-  return { profiles, rejected };
+  return {
+    source: source.id,
+    profiles,
+    rejected: issues.filter(isRejectedIssue).length,
+    input,
+    issues,
+  };
 }
 
 function supportedHeaders(headers: Pick<Headers, "has">): void {

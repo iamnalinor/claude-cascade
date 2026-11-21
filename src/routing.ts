@@ -1,4 +1,5 @@
 import { endpoints, isKnown, isProxy } from "./endpoints.ts";
+import { exitOutbounds } from "./exit-chain.ts";
 import { type JsonObject, object, objects, string } from "./json-value.ts";
 import {
   adaptLegacyTransport,
@@ -43,7 +44,7 @@ const PROFILE_FIELDS = new Set([
   "routing",
   "stats",
 ]);
-type CascadeOptions = { legacyXdns?: boolean; mainTag?: string };
+type CascadeOptions = { legacyXdns?: boolean; mainTag?: string; via?: JsonObject };
 type RouteDestination = { balancerTag: string } | { outboundTag: string };
 
 export function automaticInbounds(): JsonObject[] {
@@ -82,10 +83,16 @@ export function cascade(
   const outbounds = original.map((outbound) =>
     outbound === main ? { ...main, tag: mainTag } : outbound,
   );
-  outbounds.push(makeExit(bridge, mainTag, exitTag), {
-    protocol: "freedom",
-    tag: ruTag,
-  });
+  outbounds.push(
+    ...exitOutbounds(bridge, mainTag, {
+      tag: exitTag,
+      ...(options.via !== undefined && { via: options.via }),
+    }),
+    {
+      protocol: "freedom",
+      tag: ruTag,
+    },
+  );
   const dns = profile.dns == null ? encryptedDns(dnsTag, { outboundTag: mainTag }) : undefined;
   const { log: _log, ...profileSettings } = profile;
   return {
@@ -126,20 +133,6 @@ export function encryptedDns(
   };
 }
 
-export function makeExit(bridge: JsonObject, main: string, tag: string): JsonObject {
-  const stream = object(bridge.streamSettings);
-  const protocol = string(bridge.protocol);
-  if (protocol === undefined) {
-    throw new Error("missing-exit-protocol");
-  }
-  return {
-    protocol,
-    settings: bridge.settings ?? {},
-    streamSettings: { ...stream, sockopt: { ...object(stream?.sockopt), dialerProxy: main } },
-    tag,
-  };
-}
-
 function cascadeTags(
   profile: JsonObject,
   routing: JsonObject,
@@ -161,7 +154,7 @@ function cascadeTags(
       `${prefix}dns`,
     ];
     if (
-      tags.every(
+      [...tags, `via-${tags[0]}`].every(
         (tag) => !graph.has(tag) && selectors.every((selector) => !tag.startsWith(selector)),
       ) &&
       inbounds.every((inbound) => inbound.tag !== tags[3])
