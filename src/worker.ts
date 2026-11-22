@@ -8,7 +8,7 @@ import { diagnosticLines, subscriptionAnnouncement } from "./subscription-announ
 
 const NO_STORE = "private, no-store";
 const TOKEN_PATTERN = /^[\w-]{32,128}$/iu;
-const URL_PATTERN = /^\/sub\/(?<token>[\w-]{32,128})(?:\/report)?$/iu;
+const URL_PATTERN = /^\/sub\/(?<token>[\w-]{32,128})$/iu;
 const REFRESH_HOURS = "6";
 
 type RuntimeDependencies = { cache?: SourceCache; fetcher?: Fetcher };

@@ -54,8 +54,8 @@ test("ordinary subscriptions show every rejected name and Russian reason immedia
   );
 });
 
-test.each(["report", "RePoRt", "REPORT"])(
-  "legacy /%s returns an ordinary fresh subscription",
+test.each(["report", "RePoRt", "REPORT", "unknown"])(
+  "rejects unexpected /%s suffix without fetching subscriptions",
   async (suffix) => {
     let calls = 0;
     const worker = createWorker({
@@ -68,24 +68,11 @@ test.each(["report", "RePoRt", "REPORT"])(
       new Request(`${request().url}/${suffix}`, request()),
       config,
     );
-    expect(response.status).toBe(200);
-    expect(Array.isArray(parseJson(await response.text()))).toBe(true);
-    expect(calls).toBe(1);
+    expect(response.status).toBe(404);
+    expect(parseJson(await response.text())).toEqual({ error: "not-found" });
+    expect(calls).toBe(0);
   },
 );
-
-test("legacy alias preserves token authentication", async () => {
-  const worker = createWorker({
-    fetcher: () => {
-      throw new Error("must not fetch");
-    },
-  });
-  const response = await worker.fetch(
-    new Request(`${request("fixture", "0".repeat(32)).url}/report`),
-    config,
-  );
-  expect(response.status).toBe(404);
-});
 
 test("inline parsing diagnostics never reveal URL credentials or client identity", async () => {
   const worker = createWorker({
